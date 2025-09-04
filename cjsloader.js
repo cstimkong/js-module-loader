@@ -1,13 +1,15 @@
 /* CJS Loader */
-'use strict';
 
-const vm = require('node:vm');
-const fs = require('node:fs');
-const path = require('node:path');
-const babelParser = require('@babel/parser');
-const babelTraverse = require('@babel/traverse').default;
-const babelGenerator = require('@babel/generator').default;
-const { instrumentCodeForForcedExecution, instrumentCodeWithTaints } = require('./instrumentation');
+import vm from  'vm';
+import fs from 'fs';
+import path from 'path';
+import Module from "module";
+import babelParser from '@babel/parser';
+import traverse from '@babel/traverse';
+import babelGenerator from '@babel/generator';
+import * as babelTypes from '@babel/types';
+
+const require = Module.createRequire(import.meta.url);
 
 const internalModules = ['module', 'buffer', 'fs',
     'path', 'vm', 'process', 'child_process', 'net',
@@ -32,10 +34,10 @@ function MockedModule(id, filename) {
  * 
  * @param {String} modulePath Absolute or relative path, which is regarded as relative
  *  or absolute path in the filesystem. 
- * @param {Object | undefined} taintInfo tainted information for instrumentation (optional)
+ * @param {Function} instrumentFunc function for instrumentation (optional)
  */
 
-function loadNodeJSModule(modulePath, instrumentFunc, recordFunc) {
+export default function loadNodeJSModule(modulePath, instrumentFunc) {
     let moduleCache = {};
     let sourceFiles = new Set();
     /* `loadingModule` is used to resolve circular references */
@@ -65,8 +67,8 @@ function loadNodeJSModule(modulePath, instrumentFunc, recordFunc) {
                 }
 
                 let ast = babelParser.parse(instrumentedCode, { sourceFilename: path.resolve(modulePath) });
-
-                babelTraverse(ast, {
+                
+                traverse.default(ast, {
                     Program: {
                         exit(path) {
                             let funcExpr = babelTypes.functionExpression(
@@ -91,7 +93,7 @@ function loadNodeJSModule(modulePath, instrumentFunc, recordFunc) {
                     }
                 });
 
-                instrumentedCode = babelGenerator(ast).code;
+                instrumentedCode = babelGenerator.default(ast).code;
 
                 let compiledFunction = vm.runInThisContext(instrumentedCode, {
                     filename: path.resolve(modulePath)
@@ -120,7 +122,8 @@ function loadNodeJSModule(modulePath, instrumentFunc, recordFunc) {
                 return m.exports;
 
             } catch (e) {
-                throw new Error(`Error occurs in loading module ${modulePath}: ${e.message}`);
+                throw e;
+                // throw new Error(`Error occurs in loading module ${modulePath}: ${e.message}`);
             }
         }
         else if (fs.existsSync(modulePath) && fs.statSync(modulePath).isDirectory()) {
@@ -164,9 +167,11 @@ function loadNodeJSModule(modulePath, instrumentFunc, recordFunc) {
         if (internalModules.indexOf(moduleName) >= 0) {
             return require(moduleName);
         }
+
         if (moduleName.startsWith('node:')) {
             return require(moduleName);
         }
+
         if (moduleName.startsWith('./') || moduleName.startsWith('../')) {
             if (moduleName.endsWith('.js') || moduleName.endsWith('.cjs')) {
                 return _loadNodeJSModule(
@@ -242,8 +247,4 @@ function loadNodeJSModule(modulePath, instrumentFunc, recordFunc) {
     }
 
     return [_loadNodeJSModule(modulePath, true, {}), Array.from(sourceFiles)];
-
 }
-
-
-module.exports = loadNodeJSModule;
