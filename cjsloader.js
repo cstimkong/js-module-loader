@@ -1,20 +1,19 @@
-/**
- * 
- * This file is part of FesaJS
- */
-
+/* CJS Loader */
 'use strict';
 
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
+const babelParser = require('@babel/parser');
+const babelTraverse = require('@babel/traverse').default;
+const babelGenerator = require('@babel/generator').default;
 const { instrumentCodeForForcedExecution, instrumentCodeWithTaints } = require('./instrumentation');
 
 const internalModules = ['module', 'buffer', 'fs',
-     'path', 'vm', 'process', 'child_process', 'net', 
-     'http', 'https', 'tls', 'events', 'crypto', 
-     'stream', 'os', 'url', 'dns', 'util', 'zlib', 
-     'assert', 'tty'
+    'path', 'vm', 'process', 'child_process', 'net',
+    'http', 'https', 'tls', 'events', 'crypto',
+    'stream', 'os', 'url', 'dns', 'util', 'zlib',
+    'assert', 'tty'
 ];
 
 /**
@@ -36,7 +35,7 @@ function MockedModule(id, filename) {
  * @param {Object | undefined} taintInfo tainted information for instrumentation (optional)
  */
 
-function loadNodeJSModule(modulePath, taintInfo) {
+function loadNodeJSModule(modulePath, instrumentFunc, recordFunc) {
     let moduleCache = {};
     let sourceFiles = new Set();
     /* `loadingModule` is used to resolve circular references */
@@ -59,15 +58,41 @@ function loadNodeJSModule(modulePath, taintInfo) {
             try {
                 let rawCode = fs.readFileSync(modulePath, { encoding: 'utf-8' });
                 let instrumentedCode;
-                if (instrumented || (instrumented === undefined)) {
-                    if (taintInfo) {
-                        instrumentedCode = instrumentCodeWithTaints(rawCode, path.resolve(modulePath), taintInfo);
-                    } else {
-                        instrumentedCode = instrumentCodeForForcedExecution(rawCode, path.resolve(modulePath));
-                    }
+                if (instrumentFunc !== undefined) {
+                    instrumentedCode = instrumentFunc(rawCode, path.resolve(modulePath));
                 } else {
                     instrumentedCode = rawCode;
                 }
+
+                let ast = babelParser.parse(instrumentedCode, { sourceFilename: path.resolve(modulePath) });
+
+                babelTraverse(ast, {
+                    Program: {
+                        exit(path) {
+                            let funcExpr = babelTypes.functionExpression(
+                                null,
+                                [
+                                    babelTypes.identifier('module'),
+                                    babelTypes.identifier('exports'),
+                                    babelTypes.identifier('require'),
+                                    babelTypes.identifier('__filename'),
+                                    babelTypes.identifier('__dirname')
+                                ],
+                                babelTypes.blockStatement(
+                                    path.node.body,
+                                    path.node.directives
+                                )
+                            );
+
+                            path.node.body = [babelTypes.parenthesizedExpression(funcExpr)];
+                            path.node.directives = [];
+                            path.skip();
+                        }
+                    }
+                });
+
+                instrumentedCode = babelGenerator(ast).code;
+
                 let compiledFunction = vm.runInThisContext(instrumentedCode, {
                     filename: path.resolve(modulePath)
                 });
@@ -76,22 +101,15 @@ function loadNodeJSModule(modulePath, taintInfo) {
                 if (loadingModules) {
                     loadingModules[path.resolve(modulePath)] = m;
                 }
-                
+
+
                 compiledFunction.call(
                     m.exports,
                     m,
                     m.exports,
                     mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules),
-                    path.resolve(modulePath), path.dirname(path.resolve(modulePath)),
-                    function (start, end, filename, content) {
-                        if (typeof globalThis.__record__ === 'function') {
-                            // __record__ on globalThis should be modified before a forced execution
-                            globalThis.__record__({ startByte: start, endByte: end, filename: filename, content: content });
-                        } else {
-                            // a fallback __record__ implementation, should not be use
-                            console.log(`Start byte: ${JSON.stringify(start)}, end byte: ${end}, file: ${filename} content: ${JSON.stringify(content)}`);
-                        }
-                    }
+                    path.resolve(modulePath), 
+                    path.dirname(path.resolve(modulePath))
                 );
 
                 sourceFiles.add(path.resolve(modulePath));

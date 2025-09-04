@@ -1,0 +1,23 @@
+{
+  "name": "js-module-loader",
+  "version": "1.0.0",
+  "description": "Mocked JavaScript module loader",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cstimkong/js-module-loader.git"
+  },
+  "author": "Dezhen Kong",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cstimkong/js-module-loader/issues"
+  },
+  "homepage": "https://github.com/cstimkong/js-module-loader#readme",
+  "dependencies": {
+    "@babel/generator": "^7.28.3",
+    "@babel/parser": "^7.28.3"
+  }
+}
