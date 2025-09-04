@@ -156,6 +156,11 @@ function loadNodeJSModule(modulePath, instrumentFunc, recordFunc) {
     }
 
     function mockedRequire(currentModulePath, loadingModules, moduleName) {
+        /* If the loaded module require a module named 'module', require the mocked Module directly */
+        if (moduleName === 'node:module' || moduleName === 'module') {
+            return MockedModule;
+        }
+
         if (internalModules.indexOf(moduleName) >= 0) {
             return require(moduleName);
         }
