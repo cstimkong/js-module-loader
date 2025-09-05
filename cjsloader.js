@@ -148,10 +148,10 @@ function getRealSubPath(subPathSpec, modulePath) {
  * @param {String} modulePath Absolute or relative path, which is regarded as relative
  *  or absolute path in the filesystem. 
  * @param {String} subPath The subpath of the module
- * @param {Function} instrumentFunc function for instrumentation (optional)
+ * @param {Object} options Additional options
  */
 
-export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
+export default function loadNodeJSModule(modulePath, subPath, options) {
     let moduleCache = {};
     let sourceFiles = new Set();
     /* `loadingModule` is used to resolve circular references */
@@ -183,7 +183,7 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                 rawCode = babelGenerator.default(transformImportMeta(babelParser.parse(rawCode, { sourceType: 'module' }))).code;
 
                 let instrumentedCode;
-                if (instrumentFunc !== undefined) {
+                if (options && options.instrumentFunc !== undefined) {
                     instrumentedCode = instrumentFunc(rawCode, path.resolve(modulePath));
                 } else {
                     instrumentedCode = rawCode;
@@ -201,7 +201,9 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                                     babelTypes.identifier('exports'),
                                     babelTypes.identifier('require'),
                                     babelTypes.identifier('__filename'),
-                                    babelTypes.identifier('__dirname')
+                                    babelTypes.identifier('__dirname'),
+                                    babelTypes.identifier('__import'),
+                                    babelTypes.identifier('__importmeta')
                                 ],
                                 babelTypes.blockStatement(
                                     path.node.body,
@@ -316,13 +318,13 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                             moduleFilePath = path.join(moduleFilePath, 'index.js');
                         }
                         else if (fs.existsSync(moduleFilePath + '.js')) {
-                            moduleFilePath += '.js'
+                            moduleFilePath += '.js';
                         }
                         else if (fs.existsSync(moduleFilePath + '.cjs')) {
-                            moduleFilePath += '.cjs'
+                            moduleFilePath += '.cjs';
                         }
                         else if (fs.existsSync(moduleFilePath + '.mjs')) {
-                            moduleFilePath += '.mjs'
+                            moduleFilePath += '.mjs';
                         }
                     }
                     return _loadNodeJSModule(moduleFilePath, true, loadingModules);
@@ -358,10 +360,10 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
             return MockedModule;
         }
 
+        /* Directly load the internal modules */
         if (internalModules.indexOf(moduleName) >= 0) {
             return require(moduleName);
         }
-
         if (moduleName.startsWith('node:')) {
             return require(moduleName);
         }
@@ -441,12 +443,20 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
             } else {
                 return _loadNodeJSModule(md, true, loadingModules, rest);
             }
-
         }
     }
 
     async function mockedImport(moduleName) {
         // TODO
+        if (moduleName === 'node:module' || moduleName === 'module') {
+            return MockedModule;
+        }
+        if (moduleName.startsWith('node:')) {
+            return import(moduleName);
+        }
+        if (internalModules.indexOf(moduleName) >= 0) {
+            return import(moduleName);
+        }
     }
 
     return [_loadNodeJSModule(modulePath, true, {}, subPath), Array.from(sourceFiles)];
