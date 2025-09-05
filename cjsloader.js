@@ -1,14 +1,16 @@
 /* CJS Loader */
 
-import vm from  'vm';
+import vm from 'vm';
 import fs from 'fs';
 import path from 'path';
 import Module from "module";
 import babelParser from '@babel/parser';
 import traverse from '@babel/traverse';
 import babelGenerator from '@babel/generator';
+import babelCore from '@babel/core';
 import * as babelTypes from '@babel/types';
 
+/* require is only to load internal modules */
 const require = Module.createRequire(import.meta.url);
 
 const internalModules = ['module', 'buffer', 'fs',
@@ -28,20 +30,47 @@ function MockedModule(id, filename) {
     this.filename = filename;
 }
 
+/**
+ * Whether a path refers to a Node.js module
+ * @param {String} modulePath 
+ */
+function isNodeJSModule(modulePath) {
+    let p = path.resolve(modulePath);
+    if (path.existsSync(path.join(p, 'package.json'))) {
+        return true;
+    }
+    return false;
+}
+
+function getModuleType(modulePath) {
+    if (!isNodeJSModule(modulePath)) {
+        return null;
+    }
+
+    let content = fs.readFileSync(path.join(p, 'package.json'), { encoding: 'utf-8' });
+    let packageJson = JSON.parse(content);
+    if (packageJson.type === 'module') {
+        return 'module';
+    } else {
+        return 'commonjs';
+    }
+}
+
 
 /**
  * Load an Node.js library.
  * 
  * @param {String} modulePath Absolute or relative path, which is regarded as relative
  *  or absolute path in the filesystem. 
+ * @param {String} subPath The subpath of the module
  * @param {Function} instrumentFunc function for instrumentation (optional)
  */
 
-export default function loadNodeJSModule(modulePath, instrumentFunc) {
+export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
     let moduleCache = {};
     let sourceFiles = new Set();
     /* `loadingModule` is used to resolve circular references */
-    function _loadNodeJSModule(modulePath, instrumented, loadingModules) {
+    function _loadNodeJSModule(modulePath, instrumented, loadingModules, subPath) {
         if (modulePath.endsWith('.json')) {
             try {
                 let jsonContent = fs.readFileSync(modulePath, { encoding: 'utf-8' });
@@ -50,7 +79,8 @@ export default function loadNodeJSModule(modulePath, instrumentFunc) {
                 throw new Error(`Error in loading module ${modulePath}`);
             }
         }
-        if (modulePath.endsWith('.js') || modulePath.endsWith('.cjs')) {
+
+        if (modulePath.endsWith('.js') || modulePath.endsWith('.cjs') || modulePath.endsWith('.mjs')) {
             if (loadingModules && loadingModules[path.resolve(modulePath)]) {
                 return loadingModules[path.resolve(modulePath)].exports;
             }
@@ -59,6 +89,11 @@ export default function loadNodeJSModule(modulePath, instrumentFunc) {
             }
             try {
                 let rawCode = fs.readFileSync(modulePath, { encoding: 'utf-8' });
+                if (modulePath.endsWith('.mjs') || modulePath.endsWith('.js')) {
+                    rawCode = babelCore.transformSync(rawCode, {
+                        plugins: ['@babel/plugin-transform-modules-commonjs']
+                    }).code;
+                }
                 let instrumentedCode;
                 if (instrumentFunc !== undefined) {
                     instrumentedCode = instrumentFunc(rawCode, path.resolve(modulePath));
@@ -67,7 +102,7 @@ export default function loadNodeJSModule(modulePath, instrumentFunc) {
                 }
 
                 let ast = babelParser.parse(instrumentedCode, { sourceFilename: path.resolve(modulePath) });
-                
+
                 traverse.default(ast, {
                     Program: {
                         exit(path) {
@@ -104,13 +139,12 @@ export default function loadNodeJSModule(modulePath, instrumentFunc) {
                     loadingModules[path.resolve(modulePath)] = m;
                 }
 
-
                 compiledFunction.call(
                     m.exports,
                     m,
                     m.exports,
                     mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules),
-                    path.resolve(modulePath), 
+                    path.resolve(modulePath),
                     path.dirname(path.resolve(modulePath))
                 );
 
@@ -122,35 +156,58 @@ export default function loadNodeJSModule(modulePath, instrumentFunc) {
                 return m.exports;
 
             } catch (e) {
-                throw e;
-                // throw new Error(`Error occurs in loading module ${modulePath}: ${e.message}`);
+                throw new Error(`Error occurs in loading module ${modulePath}: ${e.message}`);
             }
         }
         else if (fs.existsSync(modulePath) && fs.statSync(modulePath).isDirectory()) {
-
-            let entryFile = 'index.js';
             let packageJsonPath = path.resolve(path.join(modulePath, 'package.json'));
-            if (fs.existsSync(packageJsonPath) && fs.statSync(packageJsonPath).isFile()) {
-                let jsonContent = fs.readFileSync(packageJsonPath, { encoding: 'utf-8' });
-                let packageJsonObject = JSON.parse(jsonContent);
-                if (packageJsonObject.main) {
-                    entryFile = packageJsonObject.main;
-                }
+            if (!path.existsSync(packageJsonPath) || !fs.statSync(packageJsonPath).isFile()) {
+                throw new Error(`Module not found: ${modulePath}`);
             }
 
-            if (!entryFile.endsWith('.js') && !entryFile.endsWith('.cjs')) {
-                if (fs.existsSync(path.join(modulePath, entryFile + '.js'))) {
-                    entryFile += '.js'
+            if (getModuleType(modulePath) === 'commonjs') {
+                if (!subPath) {
+                    let entryFile = 'index.js';
+
+                    let jsonContent = fs.readFileSync(packageJsonPath, { encoding: 'utf-8' });
+                    let packageJsonObject = JSON.parse(jsonContent);
+                    if (packageJsonObject.main) {
+                        entryFile = packageJsonObject.main;
+                    }
+
+                    if (!entryFile.endsWith('.js') && !entryFile.endsWith('.cjs')) {
+                        if (fs.existsSync(path.join(modulePath, entryFile + '.js'))) {
+                            entryFile += '.js'
+                        }
+                        else if (fs.existsSync(path.join(modulePath, entryFile + '.cjs'))) {
+                            entryFile += '.cjs'
+                        }
+                    }
+                    return _loadNodeJSModule(
+                        path.resolve(path.join(modulePath, entryFile)),
+                        true,
+                        loadingModules
+                    );
                 }
-                else if (fs.existsSync(path.join(modulePath, entryFile + '.cjs'))) {
-                    entryFile += '.cjs'
+                else {
+                    let moduleFilePath = path.resolve(path.join(modulePath, subPath.replace('/', path.sep)));
+                    if (!moduleFilePath.endsWith('.js') && !moduleFilePath.endsWith('.cjs')) {
+                        if (fs.existsSync(path.join(moduleFilePath, 'index.js')) && fs.statSync(path.join(moduleFilePath, 'index.js')).isFile()) {
+                            moduleFilePath = path.join(moduleFilePath, 'index.js');
+                        }
+                        else if (fs.existsSync(moduleFilePath + '.js')) {
+                            moduleFilePath += '.js'
+                        }
+                        else if (fs.existsSync(moduleFilePath+ '.cjs')) {
+                            moduleFilePath += '.cjs'
+                        }
+                    }
+                    return _loadNodeJSModule(moduleFilePath, true, loadingModules);
                 }
             }
-            return _loadNodeJSModule(
-                path.resolve(path.join(modulePath, entryFile)),
-                true,
-                loadingModules
-            );
+            else {
+
+            }
         }
         else {
             throw new Error(`Cannot find module: ${modulePath}`);
@@ -201,50 +258,56 @@ export default function loadNodeJSModule(modulePath, instrumentFunc) {
             throw new Error('Cannot find module.');
         }
         else {
-            let additionalPath = null;
-            if (moduleName.indexOf('/') >= 0) {
-                let idx = moduleName.indexOf('/');
-                moduleName = moduleName.substring(0, idx);
-                additionalPath = moduleName.substring(idx + 1);
-            }
+            let moduleNameParts = moduleName.split('/');
+
             let d = path.resolve(path.dirname(currentModulePath));
-            while (!fs.existsSync(path.join(d, 'node_modules', moduleName))) {
+            while (!fs.existsSync(path.join(d, 'node_modules', moduleName[0]))) {
                 if (d === path.join(d, '..')) {
                     break;
                 }
                 d = path.join(d, '..');
             }
 
-            if (additionalPath) {
-                if (additionalPath.endsWith('.js') || additionalPath.endsWith('.cjs')) {
-                    let modulePath = path.join(d, 'node_modules', moduleName, additionalPath);
-                    return _loadNodeJSModule(modulePath, true, loadingModules);
+            let md = d;
+            let idx = 0;
+            let rest = null;
+            while (idx < moduleNameParts.length) {
+                if (path.existsSync(path.join(md, moduleNameParts[idx])) &&
+                    fs.statSync(path.join(md, moduleNameParts[idx])).isDirectory()) {
+                    md += moduleNameParts[idx];
+                }
+                else if (path.existsSync(path.join(md, moduleNameParts[idx] + '.js')) &&
+                    fs.statSync(path.join(md, moduleNameParts[idx] + '.js')).isFile()) {
+                    md += moduleNameParts[idx] + '.js';
+                    if (idx !== moduleName.length - 1)
+                        throw new Error(`Module not found: ${moduleName}`);
+                    break;
+                }
+                else if (path.existsSync(path.join(md, moduleNameParts[idx] + '.cjs')) &&
+                    fs.statSync(path.join(md, moduleNameParts[idx] + '.cjs')).isFile()) {
+                    md += moduleNameParts[idx] + '.cjs';
+                    if (idx !== moduleName.length - 1)
+                        throw new Error(`Module not found: ${moduleName}`);
+                    break;
                 }
 
-                let targetModulePath = path.join(d, 'node_modules', moduleName, additionalPath + '.js');
-
-                if (fs.existsSync(targetModulePath)) {
-                    return _loadNodeJSModule(targetModulePath, true, loadingModules);
-                }
-
-                targetModulePath = path.join(d, 'node_modules', moduleName, additionalPath + '.cjs');
-
-                if (fs.existsSync(targetModulePath)) {
-                    return _loadNodeJSModule(targetModulePath, true, loadingModules);
-                }
-
-                targetModulePath = path.join(d, 'node_modules', moduleName, additionalPath);
-                if (fs.existsSync(targetModulePath)) {
-                    return _loadNodeJSModule(targetModulePath, true, loadingModules);
-                }
-
-                throw new Error('Cannot find module.');
-
+                idx += 1;
+                if (isNodeJSModule(md))
+                    break;
             }
-            let modulePath = path.join(d, 'node_modules', moduleName);
-            return _loadNodeJSModule(modulePath, true, loadingModules);
+
+            if (idx < moduleNameParts.length) {
+                rest = moduleNameParts.slice(idx).join('/');
+            }
+
+            if ((md.endsWith('.js') || md.endsWith('.cjs') || md.endsWith('.mjs')) && fs.statSync(md).isFile()) {
+                return _loadNodeJSModule(md, true, loadingModules);
+            } else {
+                return _loadNodeJSModule(md, true, loadingModules, rest);
+            }
+
         }
     }
 
-    return [_loadNodeJSModule(modulePath, true, {}), Array.from(sourceFiles)];
+    return [_loadNodeJSModule(modulePath, true, {}, subPath), Array.from(sourceFiles)];
 }

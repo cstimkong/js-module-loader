@@ -17,8 +17,10 @@
   },
   "homepage": "https://github.com/cstimkong/js-module-loader#readme",
   "dependencies": {
+    "@babel/core": "^7.28.3",
     "@babel/generator": "^7.28.3",
     "@babel/parser": "^7.28.3",
+    "@babel/plugin-transform-modules-commonjs": "^7.27.1",
     "@babel/traverse": "^7.28.3"
   },
   "type": "module"
