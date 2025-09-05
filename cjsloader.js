@@ -161,26 +161,48 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
         }
         else if (fs.existsSync(modulePath) && fs.statSync(modulePath).isDirectory()) {
             let packageJsonPath = path.resolve(path.join(modulePath, 'package.json'));
+            let jsonContent = fs.readFileSync(packageJsonPath, { encoding: 'utf-8' });
+            let packageJsonObject = JSON.parse(jsonContent);
             if (!path.existsSync(packageJsonPath) || !fs.statSync(packageJsonPath).isFile()) {
-                throw new Error(`Module not found: ${modulePath}`);
+                throw new Error(`Not a moudle: ${modulePath}`);
             }
 
-            if (getModuleType(modulePath) === 'commonjs') {
-                if (!subPath) {
-                    let entryFile = 'index.js';
+            if (!subPath) {
+                let entryFile = 'index.js';
 
-                    let jsonContent = fs.readFileSync(packageJsonPath, { encoding: 'utf-8' });
-                    let packageJsonObject = JSON.parse(jsonContent);
-                    if (packageJsonObject.main) {
+                if (!packageJsonObject.exports || typeof packageJsonObject.exports === 'string') {
+                    if (packageJsonObject.exports) {
+                        entryFile = packageJsonObject.exports;
+                    }
+                    else if (packageJsonObject.main) {
                         entryFile = packageJsonObject.main;
                     }
 
-                    if (!entryFile.endsWith('.js') && !entryFile.endsWith('.cjs')) {
+                    if (!entryFile.endsWith('.js') && !entryFile.endsWith('.cjs') && !entryFile.endsWith('.mjs')) {
                         if (fs.existsSync(path.join(modulePath, entryFile + '.js'))) {
                             entryFile += '.js'
                         }
                         else if (fs.existsSync(path.join(modulePath, entryFile + '.cjs'))) {
                             entryFile += '.cjs'
+                        }
+                        else if (fs.existsSync(path.join(modulePath, entryFile + '.mjs'))) {
+                            entryFile += '.mjs'
+                        }
+                    }
+                    return _loadNodeJSModule(
+                        path.resolve(path.join(modulePath, entryFile)),
+                        true,
+                        loadingModules
+                    );
+                } else {
+                    let entryFile = 'index.js';
+                    if (packageJsonObject.exports['.']) {
+                        if (typeof packageJsonObject.exports['.'] === 'string') {
+                            entryFile = packageJsonObject.exports['.'].replace('/', path.sep);
+                        } else if (typeof packageJsonObject.exports['.'] === 'object') {
+                            if (packageJsonObject.exports['.'].require === 'string') {
+                                entryFile = packageJsonObject.exports['.'].require;
+                            }
                         }
                     }
                     return _loadNodeJSModule(
@@ -189,7 +211,10 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                         loadingModules
                     );
                 }
-                else {
+
+            }
+            else {
+                if (!packageJsonObject.exports) {
                     let moduleFilePath = path.resolve(path.join(modulePath, subPath.replace('/', path.sep)));
                     if (!moduleFilePath.endsWith('.js') && !moduleFilePath.endsWith('.cjs')) {
                         if (fs.existsSync(path.join(moduleFilePath, 'index.js')) && fs.statSync(path.join(moduleFilePath, 'index.js')).isFile()) {
@@ -198,16 +223,23 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                         else if (fs.existsSync(moduleFilePath + '.js')) {
                             moduleFilePath += '.js'
                         }
-                        else if (fs.existsSync(moduleFilePath+ '.cjs')) {
+                        else if (fs.existsSync(moduleFilePath + '.cjs')) {
                             moduleFilePath += '.cjs'
+                        }
+                        else if (fs.existsSync(path.join(modulePath, entryFile + '.mjs'))) {
+                            entryFile += '.mjs'
                         }
                     }
                     return _loadNodeJSModule(moduleFilePath, true, loadingModules);
+                } else {
+                    if (!subPath.startsWith('./')) {
+                        subPath = './' + subPath;
+                    }
+                    // TODO
                 }
-            }
-            else {
 
             }
+
         }
         else {
             throw new Error(`Cannot find module: ${modulePath}`);
