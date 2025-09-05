@@ -36,3 +36,13 @@ import { hideBin } from 'yargs/helpers'
 ```javascript
 loadNodeJSModule('/home/test/yargs', 'helpers');
 ```
+
+### Supported Options
+
+Supported options are listed as follows:
+
+| Option name | Type  | Description |
+| ----------- | ----- | ----------- |
+| `instrumentFunc` | `Function` or `null` | function for instrumentation, accepting 2 arguments (code string and file name) |
+| `async`    | boolean | whether to asynchronously load the module (corresponding to `import()` call) |
+| `returnFiles` | boolean | whether to return all included source files |
