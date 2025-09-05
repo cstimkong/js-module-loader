@@ -78,28 +78,65 @@ function transformImportMeta(ast) {
     return ast;
 }
 
-function getRealSubPath(subPathSpec) {
+/**
+ * 
+ * @param {String} subPathSpec `exports` spec of the subpath
+ * @param {String} modulePath path of the Node.js module (containing a package.json file)
+ * @returns null or the real subpath
+ */
+function getRealSubPath(subPathSpec, modulePath) {
     let realSubPath = null;
     if (Array.isArray(subPathSpec)) {
         for (let spec of subPathSpec) {
             if (typeof spec === 'object') {
-                if (spec.require === 'string') {
-                    realSubPath = spec.require;
-                    break;
+                if (spec.require) {
+                    if (typeof spec.require === 'string') {
+                        realSubPath = spec.require;
+                    }
+                    else if (typeof spec.require === 'object' && typeof spec.require.default === 'string') {
+                        realSubPath = spec.require.default;
+                    }
                 }
-                else if (spec.default === 'string') {
-                    realSubPath = spec.default;
-                    break;
+                else if (spec.default) {
+                    if (typeof spec.default === 'string') {
+                        realSubPath = spec.default;
+                    }
                 }
-                else if (spec.import === 'string') {
-                    realSubPath = spec.import;
+                else if (spec.import) {
+                    if (typeof spec.import === 'string') {
+                        realSubPath = spec.import;
+                    }
+                    else if (typeof spec.import === 'object' && typeof spec.import.default === 'string') {
+                        realSubPath = spec.import.default;
+                    }
+                }
+
+                if (fs.existsSync(path.join(modulePath, realSubPath.replace('/', path.sep)))) {
                     break;
                 }
             }
             else if (typeof spec === 'string') {
                 realSubPath = spec;
-                break;
+                if (fs.existsSync(path.join(modulePath, realSubPath.replace('/', path.sep)))) {
+                    break;
+                }
             }
+        }
+    }
+
+    else if (typeof subPathSpec === 'string') {
+        return subPathSpec;
+    }
+
+    else if (typeof subPathSpec === 'object') {
+        if (typeof subPathSpec.require === 'string') {
+            realSubPath = subPathSpec.require;
+        }
+        else if (typeof subPathSpec.default === 'string') {
+            realSubPath = subPathSpec.default;
+        }
+        else if (typeof subPathSpec.import === 'string') {
+            realSubPath = subPathSpec.import;
         }
     }
     return realSubPath;
@@ -294,8 +331,8 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                         subPath = './' + subPath;
                     }
 
-                    let realSubPath = getRealSubPath(packageJsonObject.exports[subPath]);
-                    
+                    let realSubPath = getRealSubPath(packageJsonObject.exports[subPath], modulePath);
+
                     if (!realSubPath) {
                         throw new Error(`Cannot import the module ${modulePath} with subpath ${subPath}`);
                     }
