@@ -36,7 +36,7 @@ function MockedModule(id, filename) {
  */
 function isNodeJSModule(modulePath) {
     let p = path.resolve(modulePath);
-    if (path.existsSync(path.join(p, 'package.json'))) {
+    if (fs.existsSync(path.join(p, 'package.json'))) {
         return true;
     }
     return false;
@@ -56,6 +56,54 @@ function getModuleType(modulePath) {
     }
 }
 
+/**
+ * Transform `import.meta` structure in the source code into `__importmeta`
+ * 
+ */
+function transformImportMeta(ast) {
+    traverse.default(ast, {
+        MetaProperty: {
+            exit(path) {
+                path.replaceWith(babelTypes.identifier('__importmeta'));
+                path.skip();
+            }
+        },
+        Import: {
+            exit(path) {
+                path.replaceWith(babelTypes.identifier('__import'));
+                path.skip();
+            }
+        }
+    });
+    return ast;
+}
+
+function getRealSubPath(subPathSpec) {
+    let realSubPath = null;
+    if (Array.isArray(subPathSpec)) {
+        for (let spec of subPathSpec) {
+            if (typeof spec === 'object') {
+                if (spec.require === 'string') {
+                    realSubPath = spec.require;
+                    break;
+                }
+                else if (spec.default === 'string') {
+                    realSubPath = spec.default;
+                    break;
+                }
+                else if (spec.import === 'string') {
+                    realSubPath = spec.import;
+                    break;
+                }
+            }
+            else if (typeof spec === 'string') {
+                realSubPath = spec;
+                break;
+            }
+        }
+    }
+    return realSubPath;
+}
 
 /**
  * Load an Node.js library.
@@ -94,6 +142,9 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                         plugins: ['@babel/plugin-transform-modules-commonjs']
                     }).code;
                 }
+
+                rawCode = babelGenerator.default(transformImportMeta(babelParser.parse(rawCode, { sourceType: 'module' }))).code;
+
                 let instrumentedCode;
                 if (instrumentFunc !== undefined) {
                     instrumentedCode = instrumentFunc(rawCode, path.resolve(modulePath));
@@ -156,14 +207,15 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                 return m.exports;
 
             } catch (e) {
-                throw new Error(`Error occurs in loading module ${modulePath}: ${e.message}`);
+                throw e;
+                // throw new Error(`Error occurs in loading module ${modulePath}: ${e.message}`);
             }
         }
         else if (fs.existsSync(modulePath) && fs.statSync(modulePath).isDirectory()) {
             let packageJsonPath = path.resolve(path.join(modulePath, 'package.json'));
             let jsonContent = fs.readFileSync(packageJsonPath, { encoding: 'utf-8' });
             let packageJsonObject = JSON.parse(jsonContent);
-            if (!path.existsSync(packageJsonPath) || !fs.statSync(packageJsonPath).isFile()) {
+            if (!fs.existsSync(packageJsonPath) || !fs.statSync(packageJsonPath).isFile()) {
                 throw new Error(`Not a moudle: ${modulePath}`);
             }
 
@@ -203,6 +255,12 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                             if (packageJsonObject.exports['.'].require === 'string') {
                                 entryFile = packageJsonObject.exports['.'].require;
                             }
+                            else if (packageJsonObject.exports['.'].default === 'string') {
+                                entryFile = packageJsonObject.exports['.'].default;
+                            }
+                            else if (packageJsonObject.exports['.'].import === 'string') {
+                                entryFile = packageJsonObject.exports['.'].import;
+                            }
                         }
                     }
                     return _loadNodeJSModule(
@@ -226,8 +284,8 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                         else if (fs.existsSync(moduleFilePath + '.cjs')) {
                             moduleFilePath += '.cjs'
                         }
-                        else if (fs.existsSync(path.join(modulePath, entryFile + '.mjs'))) {
-                            entryFile += '.mjs'
+                        else if (fs.existsSync(moduleFilePath + '.mjs')) {
+                            moduleFilePath += '.mjs'
                         }
                     }
                     return _loadNodeJSModule(moduleFilePath, true, loadingModules);
@@ -235,7 +293,17 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
                     if (!subPath.startsWith('./')) {
                         subPath = './' + subPath;
                     }
-                    // TODO
+
+                    let realSubPath = getRealSubPath(packageJsonObject.exports[subPath]);
+                    
+                    if (!realSubPath) {
+                        throw new Error(`Cannot import the module ${modulePath} with subpath ${subPath}`);
+                    }
+                    return _loadNodeJSModule(
+                        path.resolve(path.join(modulePath, realSubPath.replace('/', path.sep))),
+                        true,
+                        loadingModules
+                    );
                 }
 
             }
@@ -291,31 +359,30 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
         }
         else {
             let moduleNameParts = moduleName.split('/');
-
             let d = path.resolve(path.dirname(currentModulePath));
-            while (!fs.existsSync(path.join(d, 'node_modules', moduleName[0]))) {
+            while (!fs.existsSync(path.join(d, 'node_modules', moduleNameParts[0]))) {
                 if (d === path.join(d, '..')) {
                     break;
                 }
-                d = path.join(d, '..');
+                d = path.resolve(path.join(d, '..'));
             }
 
             let md = d;
             let idx = 0;
             let rest = null;
             while (idx < moduleNameParts.length) {
-                if (path.existsSync(path.join(md, moduleNameParts[idx])) &&
+                if (fs.existsSync(path.join(md, moduleNameParts[idx])) &&
                     fs.statSync(path.join(md, moduleNameParts[idx])).isDirectory()) {
                     md += moduleNameParts[idx];
                 }
-                else if (path.existsSync(path.join(md, moduleNameParts[idx] + '.js')) &&
+                else if (fs.existsSync(path.join(md, moduleNameParts[idx] + '.js')) &&
                     fs.statSync(path.join(md, moduleNameParts[idx] + '.js')).isFile()) {
                     md += moduleNameParts[idx] + '.js';
                     if (idx !== moduleName.length - 1)
                         throw new Error(`Module not found: ${moduleName}`);
                     break;
                 }
-                else if (path.existsSync(path.join(md, moduleNameParts[idx] + '.cjs')) &&
+                else if (fs.existsSync(path.join(md, moduleNameParts[idx] + '.cjs')) &&
                     fs.statSync(path.join(md, moduleNameParts[idx] + '.cjs')).isFile()) {
                     md += moduleNameParts[idx] + '.cjs';
                     if (idx !== moduleName.length - 1)
@@ -339,6 +406,10 @@ export default function loadNodeJSModule(modulePath, subPath, instrumentFunc) {
             }
 
         }
+    }
+
+    async function mockedImport(moduleName) {
+        // TODO
     }
 
     return [_loadNodeJSModule(modulePath, true, {}, subPath), Array.from(sourceFiles)];
