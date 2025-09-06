@@ -4,7 +4,8 @@ import vm from 'vm';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { readFile, stat } from 'fs/promises';
 import path from 'path';
-import Module from "module";
+import Module from 'module';
+import { pathToFileURL, URL } from 'url';
 import babelParser from '@babel/parser';
 import traverse from '@babel/traverse';
 import babelGenerator from '@babel/generator';
@@ -12,24 +13,8 @@ import babelCore from '@babel/core';
 import { identifier, blockStatement, functionExpression, parenthesizedExpression } from '@babel/types';
 
 /* require is only to load internal modules */
-const require = Module.createRequire(import.meta.url);
-
-const internalModules = ['module', 'buffer', 'fs', 'fs/promises',
-    'path', 'vm', 'process', 'child_process', 'net',
-    'http', 'https', 'tls', 'events', 'crypto',
-    'stream', 'os', 'url', 'dns', 'util', 'util/types', 'zlib',
-    'assert', 'tty', 'punycode', 'stream/promises'
-];
-
-/**
- * Mocked `Module` object
- * @private
- */
-function MockedModule(id, filename) {
-    this.exports = {};
-    this.id = id;
-    this.filename = filename;
-}
+const _require = Module.createRequire(import.meta.url);
+const internalModules = Module.builtinModules;
 
 /**
  * Whether a path refers to a Node.js module
@@ -158,6 +143,24 @@ export default function loadNodeJSModule(modulePath, options) {
 
     let moduleCache = {};
     let sourceFiles = new Set();
+    let loadingModules = {};
+
+    /**
+     * @private
+     * Mocked `Module` class
+     */
+    class MockedModule {
+        constructor(id, filename) {
+            this.exports = {};
+            this.id = id;
+            this.filename = filename;
+        }
+
+        static createRequire(filename) {
+            return mockedRequire.bind(undefined, path.dirname(filename instanceof URL ? filename.toString() : filename), loadingModules);
+        }
+    }
+
     /* `loadingModule` is used to resolve circular references */
     function _loadNodeJSModule(modulePath, loadingModules, subPath) {
         if (modulePath.endsWith('.json')) {
@@ -240,7 +243,12 @@ export default function loadNodeJSModule(modulePath, options) {
                     mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules),
                     path.resolve(modulePath),
                     path.dirname(path.resolve(modulePath)),
-                    mockedImport.bind(undefined, path.resolve(modulePath), loadingModules)
+                    mockedImport.bind(undefined, path.resolve(modulePath), loadingModules),
+                    {
+                        dirname: path.dirname(path.resolve(modulePath)),
+                        filename: path.resolve(modulePath),
+                        url: pathToFileURL(path.resolve(modulePath))
+                    }
                 );
 
                 sourceFiles.add(path.resolve(modulePath));
@@ -432,7 +440,12 @@ export default function loadNodeJSModule(modulePath, options) {
                     mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules),
                     path.resolve(modulePath),
                     path.dirname(path.resolve(modulePath)),
-                    mockedImport.bind(undefined, path.resolve(modulePath), loadingModules)
+                    mockedImport.bind(undefined, path.resolve(modulePath), loadingModules),
+                    {
+                        dirname: path.dirname(path.resolve(modulePath)),
+                        filename: path.resolve(modulePath),
+                        url: pathToFileURL(path.resolve(modulePath))
+                    }
                 );
 
                 sourceFiles.add(path.resolve(modulePath));
@@ -549,11 +562,11 @@ export default function loadNodeJSModule(modulePath, options) {
 
         /* Directly load the internal modules */
         if (internalModules.indexOf(moduleName) >= 0) {
-            return require(moduleName);
+            return _require(moduleName);
         }
 
         if (moduleName.startsWith('node:')) {
-            return require(moduleName);
+            return _require(moduleName);
         }
 
         if (moduleName.startsWith('./') || moduleName.startsWith('../')) {
@@ -735,9 +748,9 @@ export default function loadNodeJSModule(modulePath, options) {
 
     } else {
         if (options && options.returnSourceFiles) {
-            return _loadNodeJSModuleAsync(modulePath, {}, options.subPath).then(m => [m, Array.from(sourceFiles)]);
+            return _loadNodeJSModuleAsync(modulePath, loadingModules, options.subPath).then(m => [m, Array.from(sourceFiles)]);
         } else {
-            return _loadNodeJSModuleAsync(modulePath, {}, options.subPath);
+            return _loadNodeJSModuleAsync(modulePath, loadingModules, options.subPath);
         }
     }
 }

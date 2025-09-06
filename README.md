@@ -9,14 +9,14 @@ It is suitable for testing the modules.
 
 ```javascript
 var loader = require('js-module-loader');
-loader.loadNodeJSModule('/path/to/a/module', '/optional/subpath', /* { some options } */);
+loader.loadNodeJSModule('/path/to/a/module', {subPath: '/optional/subpath'});
 ```
 
 * ESM
 
 ```javascript
 import {loadNodeJSModule} from 'js-module-loader';
-loadNodeJSModule('/path/to/a/module', '/optional/subpath', /* { some options } */);
+loadNodeJSModule('/path/to/a/module', {subPath: '/optional/subpath'});
 ```
 
 For example, if you want to load `yargs` via subpath import using 
