@@ -234,9 +234,10 @@ export default function loadNodeJSModule(modulePath, options) {
 
                 instrumentedCode = babelGenerator.default(ast).code;
 
-                let compiledFunction = vm.runInThisContext(instrumentedCode, {
-                    filename: path.resolve(modulePath)
-                });
+                let compiledFunction = vm.runInNewContext(instrumentedCode,
+                    typeof options.globalThis === 'object' ? options.globalThis : undefined,
+                    { filename: path.resolve(modulePath) }
+                );
 
                 let m = new MockedModule();
                 if (loadingModules) {
@@ -444,9 +445,10 @@ export default function loadNodeJSModule(modulePath, options) {
 
                 instrumentedCode = babelGenerator.default(ast).code;
 
-                let compiledFunction = vm.runInThisContext(instrumentedCode, {
-                    filename: path.resolve(modulePath)
-                });
+                let compiledFunction = vm.runInNewContext(instrumentedCode,
+                    typeof options.globalThis === 'object' ? options.globalThis : undefined,
+                    { filename: path.resolve(modulePath) }
+                );
 
                 let m = new MockedModule();
                 if (loadingModules) {
