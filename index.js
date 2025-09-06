@@ -144,7 +144,7 @@ function getRealSubPath(subPathSpec, modulePath) {
 }
 
 /**
- * Load an Node.js library.
+ * Load a Node.js library.
  * 
  * @param {String} modulePath Absolute or relative path, which is regarded as relative
  *  or absolute path in the filesystem. 
