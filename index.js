@@ -651,9 +651,17 @@ export default function loadNodeJSModule(modulePath, options) {
         }
     }
     if (!options.async) {
-        return [_loadNodeJSModule(modulePath, {}, options.subPath), Array.from(sourceFiles)];
+        if (options.returnSourceFiles) {
+            return [_loadNodeJSModule(modulePath, {}, options.subPath), Array.from(sourceFiles)];
+        } else {
+            return _loadNodeJSModule(modulePath, {}, options.subPath);
+        }
+        
     } else {
-        return _loadNodeJSModuleAsync(modulePath, {}, options.subPath).then(m => [m, Array.from(sourceFiles)]);
+        if (options.returnSourceFiles) {
+            return _loadNodeJSModuleAsync(modulePath, {}, options.subPath).then(m => [m, Array.from(sourceFiles)]);
+        } else {
+            return _loadNodeJSModuleAsync(modulePath, {}, options.subPath);
+        }
     }
-    
 }
