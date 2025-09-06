@@ -103,11 +103,17 @@ function getRealSubPath(subPathSpec, modulePath) {
         if (typeof subPathSpec.require === 'string') {
             realSubPath = subPathSpec.require;
         }
+        if (typeof subPathSpec.require === 'object' && subPathSpec.require.default) {
+            realSubPath = subPathSpec.require.default;
+        }
         else if (typeof subPathSpec.default === 'string') {
             realSubPath = subPathSpec.default;
         }
         else if (typeof subPathSpec.import === 'string') {
             realSubPath = subPathSpec.import;
+        }
+        if (typeof subPathSpec.import === 'object' && subPathSpec.import.default) {
+            realSubPath = subPathSpec.import.default;
         }
     }
     return realSubPath;
@@ -254,9 +260,11 @@ export default function loadNodeJSModule(modulePath, options) {
                     path.dirname(path.resolve(modulePath)),
                     mockedImport.bind(undefined, path.resolve(modulePath), loadingModules),
                     {
+                        /* Mock import.meta structure */
                         dirname: path.dirname(path.resolve(modulePath)),
                         filename: path.resolve(modulePath),
-                        url: pathToFileURL(path.resolve(modulePath))
+                        url: pathToFileURL(path.resolve(modulePath)),
+                        resolve: mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules, true)
                     }
                 );
 
