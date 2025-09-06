@@ -3,7 +3,7 @@
 import vm from 'vm';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { readFile, stat } from 'fs/promises';
-import path, { resolve } from 'path';
+import path from 'path';
 import Module from 'module';
 import { pathToFileURL, URL } from 'url';
 import babelParser from '@babel/parser';
@@ -170,10 +170,7 @@ export default function loadNodeJSModule(modulePath, options) {
             }
         }
 
-        if (modulePath.endsWith('.js') || modulePath.endsWith('.cjs') || modulePath.endsWith('.mjs')) {
-            if (!existsSync(modulePath)) {
-                throw new Error(`Module not found: ${modulePath}`);
-            }
+        if ((modulePath.endsWith('.js') || modulePath.endsWith('.cjs') || modulePath.endsWith('.mjs')) && existsSync(modulePath) && statSync(modulePath).isFile()) {
             if (resolveOnly)
                 return modulePath;
 
@@ -382,7 +379,7 @@ export default function loadNodeJSModule(modulePath, options) {
             }
         }
 
-        if (modulePath.endsWith('.js') || modulePath.endsWith('.cjs') || modulePath.endsWith('.mjs')) {
+        if ((modulePath.endsWith('.js') || modulePath.endsWith('.cjs') || modulePath.endsWith('.mjs')) && existsSync(modulePath) && (await stat(modulePath)).isFile()) {
             if (loadingModules && loadingModules[path.resolve(modulePath)]) {
                 return loadingModules[path.resolve(modulePath)].exports;
             }
@@ -607,23 +604,20 @@ export default function loadNodeJSModule(modulePath, options) {
                 );
             }
 
-            let targetModulePath = path.join(path.dirname(currentModulePath), moduleName + '.js');
+            let targetModulePaths = [
+                path.join(path.dirname(currentModulePath), moduleName + '.js'),
+                path.join(path.dirname(currentModulePath), moduleName + '.cjs'),
+                path.join(path.dirname(currentModulePath), moduleName + '.mjs'),
+                path.join(path.dirname(currentModulePath), moduleName, 'index.js'),
+                path.join(path.dirname(currentModulePath), moduleName, 'index.cjs'),
+                path.join(path.dirname(currentModulePath), moduleName, 'index.mjs'),
+            ];
 
-            if (existsSync(targetModulePath)) {
-                return _loadNodeJSModule(targetModulePath, loadingModules, undefined, resolveOnly);
+            for (let p of targetModulePaths) {
+                if (existsSync(p)) {
+                    return _loadNodeJSModule(p, loadingModules, undefined, resolveOnly);
+                }
             }
-
-            targetModulePath = path.join(path.dirname(currentModulePath), moduleName + '.cjs');
-
-            if (existsSync(targetModulePath)) {
-                return _loadNodeJSModule(targetModulePath, loadingModules, undefined, resolveOnly);
-            }
-
-            targetModulePath = path.join(path.dirname(currentModulePath), moduleName);
-            if (existsSync(targetModulePath)) {
-                return _loadNodeJSModule(targetModulePath, loadingModules, undefined, resolveOnly);
-            }
-
             throw new Error('Cannot find module.');
         }
         else {
