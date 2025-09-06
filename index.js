@@ -3,7 +3,7 @@
 import vm from 'vm';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { readFile, stat } from 'fs/promises';
-import path from 'path';
+import path, { resolve } from 'path';
 import Module from 'module';
 import { pathToFileURL, URL } from 'url';
 import babelParser from '@babel/parser';
@@ -26,20 +26,6 @@ function isNodeJSModule(modulePath) {
         return true;
     }
     return false;
-}
-
-function getModuleType(modulePath) {
-    if (!isNodeJSModule(modulePath)) {
-        return null;
-    }
-
-    let content = readFileSync(path.join(p, 'package.json'), { encoding: 'utf-8' });
-    let packageJson = JSON.parse(content);
-    if (packageJson.type === 'module') {
-        return 'module';
-    } else {
-        return 'commonjs';
-    }
 }
 
 /**
@@ -130,9 +116,9 @@ function getRealSubPath(subPathSpec, modulePath) {
 /**
  * Load a Node.js library.
  * 
- * @param {String} modulePath Absolute or relative path, which is regarded as relative
- *  or absolute path in the filesystem. 
- * @param {String} subPath The subpath of the module
+ * @param {String} modulePath Absolute or relative path to a JavaScript module 
+ * (a directory or a JavaScript source file), which is regarded as relative
+ * or absolute path in the filesystem.
  * @param {Object} options Additional options
  */
 
@@ -147,9 +133,9 @@ export default function loadNodeJSModule(modulePath, options) {
 
     /**
      * @private
-     * Mocked `Module` class
+     * Mocked `Module` class, subject to a loading process.
      */
-    class MockedModule {
+    let MockedModule = class Module {
         constructor(id, filename) {
             this.exports = {};
             this.id = id;
@@ -157,13 +143,25 @@ export default function loadNodeJSModule(modulePath, options) {
         }
 
         static createRequire(filename) {
-            return mockedRequire.bind(undefined, path.dirname(filename instanceof URL ? filename.toString() : filename), loadingModules);
+            return mockedRequire.bind(undefined, path.dirname(filename instanceof URL ? filename.toString() : filename), loadingModules, false);
         }
     }
 
-    /* `loadingModule` is used to resolve circular references */
-    function _loadNodeJSModule(modulePath, loadingModules, subPath) {
+    /**
+     * 
+     * @private
+     * Synchronously load a module (a single JavaScript source file or a directory containt package.json),
+     * `loadingModule` is used to resolve circular references 
+     */
+    function _loadNodeJSModule(modulePath, loadingModules, subPath, resolveOnly) {
         if (modulePath.endsWith('.json')) {
+            if (!existsSync(modulePath)) {
+                throw new Error(`Module not found: ${modulePath}`);
+            }
+        
+            if (resolveOnly)
+                return modulePath;
+
             try {
                 let jsonContent = readFileSync(modulePath, { encoding: 'utf-8' });
                 return JSON.parse(jsonContent);
@@ -173,6 +171,12 @@ export default function loadNodeJSModule(modulePath, options) {
         }
 
         if (modulePath.endsWith('.js') || modulePath.endsWith('.cjs') || modulePath.endsWith('.mjs')) {
+            if (!existsSync(modulePath)) {
+                throw new Error(`Module not found: ${modulePath}`);
+            }
+            if (resolveOnly)
+                return modulePath;
+
             if (loadingModules && loadingModules[path.resolve(modulePath)]) {
                 return loadingModules[path.resolve(modulePath)].exports;
             }
@@ -183,7 +187,7 @@ export default function loadNodeJSModule(modulePath, options) {
                 let rawCode = readFileSync(modulePath, { encoding: 'utf-8' });
                 if (modulePath.endsWith('.mjs') || modulePath.endsWith('.js')) {
                     rawCode = babelCore.transformSync(rawCode, {
-                        plugins: ['@babel/plugin-transform-modules-commonjs'] // might be re-implemented later
+                        plugins: ['@babel/plugin-transform-modules-commonjs'] // might be replaced by a lightweight implementation later
                     }).code;
                 }
 
@@ -240,7 +244,15 @@ export default function loadNodeJSModule(modulePath, options) {
                     m.exports,
                     m,
                     m.exports,
-                    mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules),
+                    Object.defineProperty(
+                        mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules, false),
+                        'resolve',
+                        {
+                            enumerable: false,
+                            configurable: false,
+                            value: mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules, true)
+                        }
+                    ),
                     path.resolve(modulePath),
                     path.dirname(path.resolve(modulePath)),
                     mockedImport.bind(undefined, path.resolve(modulePath), loadingModules),
@@ -307,12 +319,13 @@ export default function loadNodeJSModule(modulePath, options) {
                         }
                     }
                     entryFile = realEntryFile;
+                    if (resolveOnly)
+                        return path.resolve(path.join(modulePath, entryFile));
                     return _loadNodeJSModule(
                         path.resolve(path.join(modulePath, entryFile)),
                         loadingModules
                     );
                 }
-
             }
 
             else {
@@ -332,25 +345,27 @@ export default function loadNodeJSModule(modulePath, options) {
                             moduleFilePath += '.mjs';
                         }
                     }
+                    if (resolveOnly)
+                        return moduleFilePath;
                     return _loadNodeJSModule(moduleFilePath, loadingModules);
                 } else {
                     if (!subPath.startsWith('./')) {
                         subPath = './' + subPath;
                     }
-
                     let realSubPath = getRealSubPath(packageJsonObject.exports[subPath], modulePath);
 
                     if (!realSubPath) {
                         throw new Error(`Cannot import the module ${modulePath} with subpath ${subPath}`);
                     }
+
+                    if (resolveOnly)
+                        return path.resolve(path.join(modulePath, realSubPath.replace('/', path.sep)));
                     return _loadNodeJSModule(
                         path.resolve(path.join(modulePath, realSubPath.replace('/', path.sep))),
                         loadingModules
                     );
                 }
-
             }
-
         }
         else {
             throw new Error(`Cannot find module: ${modulePath}`);
@@ -437,7 +452,15 @@ export default function loadNodeJSModule(modulePath, options) {
                     m.exports,
                     m,
                     m.exports,
-                    mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules),
+                    Object.defineProperty(
+                        mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules, false),
+                        'resolve',
+                        {
+                            enumerable: false,
+                            configurable: false,
+                            value: mockedRequire.bind(undefined, path.resolve(modulePath), loadingModules, true)
+                        }
+                    ),
                     path.resolve(modulePath),
                     path.dirname(path.resolve(modulePath)),
                     mockedImport.bind(undefined, path.resolve(modulePath), loadingModules),
@@ -553,19 +576,24 @@ export default function loadNodeJSModule(modulePath, options) {
         }
     }
 
-
-    function mockedRequire(currentModulePath, loadingModules, moduleName) {
+    function mockedRequire(currentModulePath, loadingModules, resolveOnly, moduleName) {
         /* If the loaded module require a module named 'module', require the mocked Module directly */
         if (moduleName === 'node:module' || moduleName === 'module') {
+            if (resolveOnly)
+                return moduleName;
             return MockedModule;
         }
 
         /* Directly load the internal modules */
         if (internalModules.indexOf(moduleName) >= 0) {
+            if (resolveOnly)
+                return moduleName;
             return _require(moduleName);
         }
 
         if (moduleName.startsWith('node:')) {
+            if (resolveOnly)
+                return moduleName;
             return _require(moduleName);
         }
 
@@ -573,25 +601,27 @@ export default function loadNodeJSModule(modulePath, options) {
             if (moduleName.endsWith('.js') || moduleName.endsWith('.cjs')) {
                 return _loadNodeJSModule(
                     path.join(path.dirname(currentModulePath), moduleName),
-                    loadingModules
+                    loadingModules,
+                    undefined,
+                    resolveOnly
                 );
             }
 
             let targetModulePath = path.join(path.dirname(currentModulePath), moduleName + '.js');
 
             if (existsSync(targetModulePath)) {
-                return _loadNodeJSModule(targetModulePath, loadingModules);
+                return _loadNodeJSModule(targetModulePath, loadingModules, undefined, resolveOnly);
             }
 
             targetModulePath = path.join(path.dirname(currentModulePath), moduleName + '.cjs');
 
             if (existsSync(targetModulePath)) {
-                return _loadNodeJSModule(targetModulePath, loadingModules);
+                return _loadNodeJSModule(targetModulePath, loadingModules, undefined, resolveOnly);
             }
 
             targetModulePath = path.join(path.dirname(currentModulePath), moduleName);
             if (existsSync(targetModulePath)) {
-                return _loadNodeJSModule(targetModulePath, loadingModules);
+                return _loadNodeJSModule(targetModulePath, loadingModules, undefined, resolveOnly);
             }
 
             throw new Error('Cannot find module.');
@@ -639,15 +669,16 @@ export default function loadNodeJSModule(modulePath, options) {
             }
 
             if ((md.endsWith('.js') || md.endsWith('.cjs') || md.endsWith('.mjs')) && statSync(md).isFile()) {
-                return _loadNodeJSModule(md, loadingModules);
+                return _loadNodeJSModule(md, loadingModules, undefined, resolveOnly);
             } else {
-                return _loadNodeJSModule(md, loadingModules, rest);
+                return _loadNodeJSModule(md, loadingModules, rest, resolveOnly);
             }
         }
     }
+    
+
 
     async function mockedImport(currentModulePath, loadingModules, moduleName) {
-        // TODO
         if (moduleName === 'node:module' || moduleName === 'module') {
             return MockedModule;
         }
@@ -741,9 +772,9 @@ export default function loadNodeJSModule(modulePath, options) {
 
     if (options && !options.async) {
         if (options && options.returnSourceFiles) {
-            return [_loadNodeJSModule(modulePath, {}, options.subPath), Array.from(sourceFiles)];
+            return [_loadNodeJSModule(modulePath, loadingModules, options.subPath), Array.from(sourceFiles)];
         } else {
-            return _loadNodeJSModule(modulePath, {}, options.subPath);
+            return _loadNodeJSModule(modulePath, loadingModules, options.subPath);
         }
 
     } else {
