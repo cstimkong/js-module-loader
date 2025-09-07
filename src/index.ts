@@ -55,7 +55,7 @@ function transformImportMeta(ast: Node) {
  * @param modulePath path of the Node.js module (containing a package.json file)
  * @returns null or the real subpath
  */
-function getRealSubPath(subPathSpec: any, modulePath: string) {
+function getRealSubPath(subPathSpec: NodeJS.Dict<any> | string, modulePath: string) {
     let realSubPath = null;
     if (Array.isArray(subPathSpec)) {
         for (let spec of subPathSpec) {
