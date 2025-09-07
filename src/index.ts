@@ -6,18 +6,18 @@ import path from 'path';
 import Module from 'module';
 import { pathToFileURL, URL } from 'url';
 import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
+import traverse, {Node, NodePath} from '@babel/traverse';
 import babelGenerator from '@babel/generator';
 import { transformSync, transformAsync } from '@babel/core';
 import { identifier, blockStatement, functionExpression, parenthesizedExpression, expressionStatement } from '@babel/types';
 
 /* require is only to load internal modules */
 const _require = Module.createRequire(import.meta.url);
-const internalModules = Module.builtinModules;
+const internalModules: readonly string[] = Module.builtinModules;
 
 /**
  * Whether a path refers to a Node.js module
- * @param {String} modulePath 
+ * @param modulePath the path to a Node.js module
  */
 function isNodeJSModule(modulePath: string) {
     let p = path.resolve(modulePath);
@@ -31,16 +31,16 @@ function isNodeJSModule(modulePath: string) {
  * Transform `import.meta` structure in the source code into `__importmeta`
  * 
  */
-function transformImportMeta(ast: any) {
+function transformImportMeta(ast: Node) {
     traverse.default(ast, {
         MetaProperty: {
-            exit(path) {
+            exit(path: NodePath) {
                 path.replaceWith(identifier('__importmeta'));
                 path.skip();
             }
         },
         Import: {
-            exit(path) {
+            exit(path: NodePath) {
                 path.replaceWith(identifier('__import'));
                 path.skip();
             }
@@ -118,16 +118,24 @@ function getRealSubPath(subPathSpec: any, modulePath: string) {
     return realSubPath;
 }
 
+export type LoadOptions = {
+    instrumentFunc?: (sourceCode: string, filename: string) => string,
+    async?: boolean,
+    globalThis?: object,
+    subPath?: string,
+    returnSourceFiles?: boolean
+}
+
 /**
  * Load a Node.js library.
  * 
- * @param {String} modulePath Absolute or relative path to a JavaScript module 
+ * @param modulePath Absolute or relative path to a JavaScript module 
  * (a directory or a JavaScript source file), which is regarded as relative
  * or absolute path in the filesystem.
- * @param {Object} options Additional options
+ * @param options Additional options
  */
 
-export default function loadNodeJSModule(modulePath: string, options: any) {
+export default function loadNodeJSModule(modulePath: string, options: LoadOptions): any {
     if (!options) {
         options = {};
     }

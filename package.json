@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "Mocked JavaScript module loader",
   "exports": {
-    ".": "./lib/index.js"
+    ".": {
+      "default": "./lib/index.js",
+      "types": "./lib/index.d.ts"
+    }
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
