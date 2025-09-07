@@ -19,7 +19,7 @@ const internalModules: readonly string[] = Module.builtinModules;
  * Whether a path refers to a Node.js module
  * @param modulePath the path to a Node.js module
  */
-function isNodeJSModule(modulePath: string) {
+function isNodeJSModule(modulePath: string): boolean {
     let p = path.resolve(modulePath);
     if (existsSync(path.join(p, 'package.json'))) {
         return true;
@@ -120,11 +120,13 @@ function getRealSubPath(subPathSpec: any, modulePath: string) {
 
 export type LoadOptions = {
     instrumentFunc?: (sourceCode: string, filename: string) => string,
-    async?: boolean,
     globalThis?: object,
     subPath?: string,
     returnSourceFiles?: boolean
 }
+
+function loadNodeJSModule(modulePath: string, async: false, options?: LoadOptions): any;
+function loadNodeJSModule(modulePath: string, async: true, options?: LoadOptions): Promise<any>;
 
 /**
  * Load a Node.js library.
@@ -135,7 +137,7 @@ export type LoadOptions = {
  * @param options Additional options
  */
 
-export default function loadNodeJSModule(modulePath: string, options: LoadOptions): any {
+function loadNodeJSModule(modulePath: string, async: boolean, options?: LoadOptions): any {
     if (!options) {
         options = {};
     }
@@ -160,7 +162,7 @@ export default function loadNodeJSModule(modulePath: string, options: LoadOption
         }
 
         static createRequire(filename: string | URL) {
-            return mockedRequire.bind(undefined, path.dirname(filename instanceof URL ? filename.toString() : filename), loadingModules, false);
+            return mockedRequire.bind(undefined, path.dirname(filename instanceof URL ? filename.toString() : filename), loadingModules, false) as Function;
         }
     }
 
@@ -785,7 +787,7 @@ export default function loadNodeJSModule(modulePath: string, options: LoadOption
         }
     }
 
-    if (options && !options.async) {
+    if (!async) {
         if (options && options.returnSourceFiles) {
             return [_loadNodeJSModule(modulePath, loadingModules, options.subPath), Array.from(sourceFiles)];
         } else {
@@ -800,3 +802,5 @@ export default function loadNodeJSModule(modulePath: string, options: LoadOption
         }
     }
 }
+
+export default loadNodeJSModule;
