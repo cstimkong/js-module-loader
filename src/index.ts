@@ -1,4 +1,3 @@
-/* CJS Loader */
 
 import vm from 'vm';
 import { existsSync, readFileSync, statSync } from 'fs';
@@ -6,11 +5,11 @@ import { readFile, stat } from 'fs/promises';
 import path from 'path';
 import Module from 'module';
 import { pathToFileURL, URL } from 'url';
-import babelParser from '@babel/parser';
+import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
 import babelGenerator from '@babel/generator';
-import babelCore from '@babel/core';
-import { identifier, blockStatement, functionExpression, parenthesizedExpression } from '@babel/types';
+import { transformSync, transformAsync } from '@babel/core';
+import { identifier, blockStatement, functionExpression, parenthesizedExpression, expressionStatement } from '@babel/types';
 
 /* require is only to load internal modules */
 const _require = Module.createRequire(import.meta.url);
@@ -20,7 +19,7 @@ const internalModules = Module.builtinModules;
  * Whether a path refers to a Node.js module
  * @param {String} modulePath 
  */
-function isNodeJSModule(modulePath) {
+function isNodeJSModule(modulePath: string) {
     let p = path.resolve(modulePath);
     if (existsSync(path.join(p, 'package.json'))) {
         return true;
@@ -32,7 +31,7 @@ function isNodeJSModule(modulePath) {
  * Transform `import.meta` structure in the source code into `__importmeta`
  * 
  */
-function transformImportMeta(ast) {
+function transformImportMeta(ast: any) {
     traverse.default(ast, {
         MetaProperty: {
             exit(path) {
@@ -52,11 +51,11 @@ function transformImportMeta(ast) {
 
 /**
  * 
- * @param {String} subPathSpec `exports` spec of the subpath
- * @param {String} modulePath path of the Node.js module (containing a package.json file)
+ * @param subPathSpec `exports` spec of the subpath
+ * @param modulePath path of the Node.js module (containing a package.json file)
  * @returns null or the real subpath
  */
-function getRealSubPath(subPathSpec, modulePath) {
+function getRealSubPath(subPathSpec: any, modulePath: string) {
     let realSubPath = null;
     if (Array.isArray(subPathSpec)) {
         for (let spec of subPathSpec) {
@@ -128,27 +127,31 @@ function getRealSubPath(subPathSpec, modulePath) {
  * @param {Object} options Additional options
  */
 
-export default function loadNodeJSModule(modulePath, options) {
+export default function loadNodeJSModule(modulePath: string, options: any) {
     if (!options) {
         options = {};
     }
 
-    let moduleCache = {};
+    let moduleCache: any = {};
     let sourceFiles = new Set();
-    let loadingModules = {};
+    let loadingModules: any = {};
 
+    let context = typeof options.globalThis === 'object' ? options.globalThis : {};
     /**
      * @private
      * Mocked `Module` class, subject to a loading process.
      */
     let MockedModule = class Module {
-        constructor(id, filename) {
+        id?: string | undefined;
+        filename?: string | undefined;
+        exports?: any;
+        constructor(id?: string, filename?: string) {
             this.exports = {};
             this.id = id;
             this.filename = filename;
         }
 
-        static createRequire(filename) {
+        static createRequire(filename: string | URL) {
             return mockedRequire.bind(undefined, path.dirname(filename instanceof URL ? filename.toString() : filename), loadingModules, false);
         }
     }
@@ -159,7 +162,7 @@ export default function loadNodeJSModule(modulePath, options) {
      * Synchronously load a module (a single JavaScript source file or a directory containt package.json),
      * `loadingModule` is used to resolve circular references 
      */
-    function _loadNodeJSModule(modulePath, loadingModules, subPath, resolveOnly) {
+    function _loadNodeJSModule(modulePath: string, loadingModules: any, subPath?: string, resolveOnly?: boolean) {
         if (modulePath.endsWith('.json')) {
             if (!existsSync(modulePath)) {
                 throw new Error(`Module not found: ${modulePath}`);
@@ -189,21 +192,21 @@ export default function loadNodeJSModule(modulePath, options) {
             try {
                 let rawCode = readFileSync(modulePath, { encoding: 'utf-8' });
                 if (modulePath.endsWith('.mjs') || modulePath.endsWith('.js')) {
-                    rawCode = babelCore.transformSync(rawCode, {
+                    rawCode = transformSync(rawCode, {
                         plugins: ['@babel/plugin-transform-modules-commonjs'] // might be replaced by a lightweight implementation later
-                    }).code;
+                    })!.code!;
                 }
 
-                rawCode = babelGenerator.default(transformImportMeta(babelParser.parse(rawCode, { sourceType: 'module' }))).code;
+                rawCode = babelGenerator.default(transformImportMeta(parse(rawCode, { sourceType: 'module' }))).code;
 
                 let instrumentedCode;
                 if (options && options.instrumentFunc !== undefined) {
-                    instrumentedCode = instrumentFunc(rawCode, path.resolve(modulePath));
+                    instrumentedCode = options.instrumentFunc(rawCode, path.resolve(modulePath));
                 } else {
                     instrumentedCode = rawCode;
                 }
 
-                let ast = babelParser.parse(instrumentedCode, { sourceFilename: path.resolve(modulePath) });
+                let ast = parse(instrumentedCode, { sourceFilename: path.resolve(modulePath) });
 
                 traverse.default(ast, {
                     Program: {
@@ -225,7 +228,7 @@ export default function loadNodeJSModule(modulePath, options) {
                                 )
                             );
 
-                            path.node.body = [parenthesizedExpression(funcExpr)];
+                            path.node.body = [expressionStatement(parenthesizedExpression(funcExpr))];
                             path.node.directives = [];
                             path.skip();
                         }
@@ -235,7 +238,7 @@ export default function loadNodeJSModule(modulePath, options) {
                 instrumentedCode = babelGenerator.default(ast).code;
 
                 let compiledFunction = vm.runInNewContext(instrumentedCode,
-                    typeof options.globalThis === 'object' ? options.globalThis : undefined,
+                    context,
                     { filename: path.resolve(modulePath) }
                 );
 
@@ -276,7 +279,7 @@ export default function loadNodeJSModule(modulePath, options) {
                 }
                 return m.exports;
 
-            } catch (e) {
+            } catch (e: any) {
                 throw new Error(`Error occurs in loading module ${modulePath}: ${e.message}`);
             }
         }
@@ -378,7 +381,7 @@ export default function loadNodeJSModule(modulePath, options) {
         }
     }
 
-    async function _loadNodeJSModuleAsync(modulePath, loadingModules, subPath) {
+    async function _loadNodeJSModuleAsync(modulePath: string, loadingModules: any, subPath?: string) {
         if (modulePath.endsWith('.json')) {
             try {
                 let jsonContent = await readFile(modulePath, { encoding: 'utf-8' });
@@ -398,21 +401,21 @@ export default function loadNodeJSModule(modulePath, options) {
             try {
                 let rawCode = await readFile(modulePath, { encoding: 'utf-8' });
                 if (modulePath.endsWith('.mjs') || modulePath.endsWith('.js')) {
-                    rawCode = (await babelCore.transformAsync(rawCode, {
+                    rawCode = (await transformAsync(rawCode, {
                         plugins: ['@babel/plugin-transform-modules-commonjs']
-                    })).code;
+                    }))!.code!;
                 }
 
-                rawCode = babelGenerator.default(transformImportMeta(babelParser.parse(rawCode, { sourceType: 'module' }))).code;
+                rawCode = babelGenerator.default(transformImportMeta(parse(rawCode, { sourceType: 'module' }))).code;
 
                 let instrumentedCode;
                 if (options && options.instrumentFunc !== undefined) {
-                    instrumentedCode = instrumentFunc(rawCode, path.resolve(modulePath));
+                    instrumentedCode = options.instrumentFunc(rawCode, path.resolve(modulePath));
                 } else {
                     instrumentedCode = rawCode;
                 }
 
-                let ast = babelParser.parse(instrumentedCode, { sourceFilename: path.resolve(modulePath), sourceType: 'module' });
+                let ast = parse(instrumentedCode, { sourceFilename: path.resolve(modulePath), sourceType: 'module' });
 
                 traverse.default(ast, {
                     Program: {
@@ -436,7 +439,7 @@ export default function loadNodeJSModule(modulePath, options) {
                                 true
                             );
 
-                            path.node.body = [parenthesizedExpression(funcExpr)];
+                            path.node.body = [expressionStatement(parenthesizedExpression(funcExpr))];
                             path.node.directives = [];
                             path.skip();
                         }
@@ -446,7 +449,7 @@ export default function loadNodeJSModule(modulePath, options) {
                 instrumentedCode = babelGenerator.default(ast).code;
 
                 let compiledFunction = vm.runInNewContext(instrumentedCode,
-                    typeof options.globalThis === 'object' ? options.globalThis : undefined,
+                    context,
                     { filename: path.resolve(modulePath) }
                 );
 
@@ -485,7 +488,7 @@ export default function loadNodeJSModule(modulePath, options) {
                 }
                 return m.exports;
 
-            } catch (e) {
+            } catch (e: any) {
                 throw new Error(`Error occurs in loading module ${modulePath}: ${e.message}`);
             }
         }
@@ -583,7 +586,7 @@ export default function loadNodeJSModule(modulePath, options) {
         }
     }
 
-    function mockedRequire(currentModulePath, loadingModules, resolveOnly, moduleName) {
+    function mockedRequire(currentModulePath: string, loadingModules: any, resolveOnly: boolean, moduleName: string) {
         /* If the loaded module require a module named 'module', require the mocked Module directly */
         if (moduleName === 'node:module' || moduleName === 'module') {
             if (resolveOnly)
@@ -631,9 +634,9 @@ export default function loadNodeJSModule(modulePath, options) {
             throw new Error('Cannot find module.');
         }
         else {
-            let moduleNameParts = moduleName.split('/');
+            let moduleNameParts: string[] = moduleName.split('/');
             let d = path.resolve(path.dirname(currentModulePath));
-            while (!existsSync(path.join(d, 'node_modules', moduleNameParts[0]))) {
+            while (!existsSync(path.join(d, 'node_modules', moduleNameParts[0]!))) {
                 if (d === path.join(d, '..')) {
                     break;
                 }
@@ -644,9 +647,9 @@ export default function loadNodeJSModule(modulePath, options) {
             let idx = 0;
             let rest = null;
             while (idx < moduleNameParts.length) {
-                if (existsSync(path.join(md, moduleNameParts[idx])) &&
-                    statSync(path.join(md, moduleNameParts[idx])).isDirectory()) {
-                    md = path.join(md, moduleNameParts[idx]);
+                if (existsSync(path.join(md, moduleNameParts[idx]!)) &&
+                    statSync(path.join(md, moduleNameParts[idx]!)).isDirectory()) {
+                    md = path.join(md, moduleNameParts[idx]!);
                 }
                 else if (existsSync(path.join(md, moduleNameParts[idx] + '.js')) &&
                     statSync(path.join(md, moduleNameParts[idx] + '.js')).isFile()) {
@@ -675,14 +678,14 @@ export default function loadNodeJSModule(modulePath, options) {
             if ((md.endsWith('.js') || md.endsWith('.cjs') || md.endsWith('.mjs')) && statSync(md).isFile()) {
                 return _loadNodeJSModule(md, loadingModules, undefined, resolveOnly);
             } else {
-                return _loadNodeJSModule(md, loadingModules, rest, resolveOnly);
+                return _loadNodeJSModule(md, loadingModules, rest!, resolveOnly);
             }
         }
     }
     
 
 
-    async function mockedImport(currentModulePath, loadingModules, moduleName) {
+    async function mockedImport(currentModulePath: string, loadingModules: any, moduleName: string) {
         if (moduleName === 'node:module' || moduleName === 'module') {
             return MockedModule;
         }
@@ -724,7 +727,7 @@ export default function loadNodeJSModule(modulePath, options) {
         else {
             let moduleNameParts = moduleName.split('/');
             let d = path.resolve(path.dirname(currentModulePath));
-            while (!existsSync(path.join(d, 'node_modules', moduleNameParts[0]))) {
+            while (!existsSync(path.join(d, 'node_modules', moduleNameParts[0]!))) {
                 if (d === path.join(d, '..')) {
                     break;
                 }
@@ -735,9 +738,9 @@ export default function loadNodeJSModule(modulePath, options) {
             let idx = 0;
             let rest = null;
             while (idx < moduleNameParts.length) {
-                if (existsSync(path.join(md, moduleNameParts[idx])) &&
-                    statSync(path.join(md, moduleNameParts[idx])).isDirectory()) {
-                    md = path.join(md, moduleNameParts[idx]);
+                if (existsSync(path.join(md, moduleNameParts[idx]!)) &&
+                    statSync(path.join(md, moduleNameParts[idx]!)).isDirectory()) {
+                    md = path.join(md, moduleNameParts[idx]!);
                 }
                 else if (existsSync(path.join(md, moduleNameParts[idx] + '.js')) &&
                     statSync(path.join(md, moduleNameParts[idx] + '.js')).isFile()) {
@@ -769,7 +772,7 @@ export default function loadNodeJSModule(modulePath, options) {
                 return _loadNodeJSModule(md, loadingModules);
             }
             else {
-                return _loadNodeJSModuleAsync(md, loadingModules, rest);
+                return _loadNodeJSModuleAsync(md, loadingModules, rest!);
             }
         }
     }
