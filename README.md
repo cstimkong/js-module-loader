@@ -3,16 +3,16 @@
 The project is for loading Node.js modules, isolated from the built-in module system.
 It is suitable for testing the modules.
 
-### How to use
+## How to use
 
-* CommonJS
+### Using CommonJS
 
 ```javascript
 var loader = require('js-module-loader');
 loader.loadNodeJSModule('/path/to/a/module', {subPath: '/optional/subpath'});
 ```
 
-* ESM
+### using ESM
 
 ```javascript
 import {loadNodeJSModule} from 'js-module-loader';
@@ -37,7 +37,7 @@ import { hideBin } from 'yargs/helpers'
 loadNodeJSModule('/home/test/yargs', {subPath: 'helpers'});
 ```
 
-### Supported Options
+## Supported Options
 
 Supported options are listed as follows:
 
@@ -48,3 +48,7 @@ Supported options are listed as follows:
 | `subPath`  | string  | the subpath of a module to load (e.g., `helpers` in `require('yargs/helpers')`) |
 | `globalThis` | object | the mocked globalThis  |
 | `returnSourceFiles` | boolean | whether to return all included source files |
+
+### Contact
+
+For any questions and suggestions, please contact me via [tim.kong@libc.io](mailto:tim.kong@libc.io).
