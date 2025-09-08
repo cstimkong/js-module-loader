@@ -5,37 +5,22 @@ It is suitable for testing the modules.
 
 ## How to use
 
-### General Usage Format
-
-* CommonJS:
+### General Usage Patterns
 
 ```javascript
-var loader = require('js-module-loader');
-loader.loadNodeJSModule('/path/to/a/module', false, {subPath: 'optional/subpath'});
+function loadNodeJSModule(modulePath: string, async: false, options?: LoadOptions): any;
+function loadNodeJSModule(modulePath: string, async: true, options?: LoadOptions): Promise<any>;
 ```
 
-* ESM:
+Parameters are explained as follows:
 
-```javascript
-import {loadNodeJSModule} from 'js-module-loader';
-loadNodeJSModule('/path/to/a/module', false, {subPath: 'optional/subpath'});
-```
+| Parameter | Explanation |
+| --------- | ----------- |
+| `modulePath` | Absolute (or relative path to the working directory) to a Node.js module | 
+| `async` | Load the module asynchronously (corresponding to [import()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import)) or synchronously (corresponding to `require` calls). |
+| `options` | Additional options (detailed below) |
 
-### Example
-
-Suppose that `yargs` module is installed at `/home/test/yargs`. Now you want to load `yargs` via [subpath](https://nodejs.org/api/packages.html#subpath-exports) import, you can use `loadNodeJSModule` as follows:
-
-```javascript
-let mod = loadNodeJSModule('/home/test/yargs', {subPath: 'helpers'});
-let hideBin = mod.hideBin;
-```
-
-This is equivalent to the code  `const { hideBin } = require('yargs/helpers')` (CommonJS) or `import { hideBin } from 'yargs/helpers'` (ESM).
-
-
-## Supported Options
-
-Supported options are listed as follows:
+Supported options:
 
 | Option name | Type  | Description |
 | ----------- | ----- | ----------- |
@@ -44,6 +29,20 @@ Supported options are listed as follows:
 | `subPath`  | string  | the subpath of a module to load (e.g., `helpers` in `require('yargs/helpers')`) |
 | `globalThis` | object | the mocked globalThis  |
 | `returnSourceFiles` | boolean | whether to return all included source files |
+
+
+### Example
+
+Suppose that `yargs` module is installed at `/home/test/yargs`. Now you want to load `yargs` via [subpath](https://nodejs.org/api/packages.html#subpath-exports) import, you can use `loadNodeJSModule` as follows:
+
+```javascript
+const loadNodeJSModule = require('js-module-loader');
+let mod = loadNodeJSModule('/home/test/yargs', {subPath: 'helpers'});
+let hideBin = mod.hideBin;
+```
+
+This is equivalent to the code  `const { hideBin } = require('yargs/helpers')` (CommonJS) or `import { hideBin } from 'yargs/helpers'` (ESM).
+
 
 ## Contact
 
