@@ -5,37 +5,33 @@ It is suitable for testing the modules.
 
 ## How to use
 
-### Using CommonJS
+### General Usage Format
+
+* CommonJS:
 
 ```javascript
 var loader = require('js-module-loader');
-loader.loadNodeJSModule('/path/to/a/module', {subPath: '/optional/subpath'});
+loader.loadNodeJSModule('/path/to/a/module', false, {subPath: 'optional/subpath'});
 ```
 
-### using ESM
+* ESM:
 
 ```javascript
 import {loadNodeJSModule} from 'js-module-loader';
-loadNodeJSModule('/path/to/a/module', {subPath: '/optional/subpath'});
+loadNodeJSModule('/path/to/a/module', false, {subPath: 'optional/subpath'});
 ```
 
-For example, if you want to load `yargs` via subpath import using 
+### Example
+
+Suppose that `yargs` module is installed at `/home/test/yargs`. Now you want to load `yargs` via [subpath](https://nodejs.org/api/packages.html#subpath-exports) import, you can use `loadNodeJSModule` as follows:
 
 ```javascript
-const { hideBin } = require('yargs/helpers')
+let mod = loadNodeJSModule('/home/test/yargs', {subPath: 'helpers'});
+let hideBin = mod.hideBin;
 ```
 
-or 
+This is equivalent to the code  `const { hideBin } = require('yargs/helpers')` (CommonJS) or `import { hideBin } from 'yargs/helpers'` (ESM).
 
-```javascript
-import { hideBin } from 'yargs/helpers'
-```
-
-, and the `yargs` module is put in the `/home/test/yargs`, you can use `loadNodeJSModule` as follows:
-
-```javascript
-loadNodeJSModule('/home/test/yargs', {subPath: 'helpers'});
-```
 
 ## Supported Options
 
@@ -49,6 +45,6 @@ Supported options are listed as follows:
 | `globalThis` | object | the mocked globalThis  |
 | `returnSourceFiles` | boolean | whether to return all included source files |
 
-### Contact
+## Contact
 
 For any questions and suggestions, please contact me via [tim.kong@libc.io](mailto:tim.kong@libc.io).
