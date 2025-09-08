@@ -1,9 +1,8 @@
 # JavaScript Module Loader
 
-The project is for loading Node.js modules, isolated from the built-in module system.
-It is suitable for testing the modules.
+The project provide another runtime module loader isolated from the default module loaders (global `require`, `import()` mechanism), easy for instrumenting the code. It is suitable for testing the JavaScript modules in an isolated environment.
 
-## How to use
+## How to Use
 
 ### General Usage Patterns
 
@@ -25,9 +24,8 @@ Supported options:
 | Option name | Type  | Description |
 | ----------- | ----- | ----------- |
 | `instrumentFunc` | `Function` or `null` | function for instrumentation, accepting 2 arguments (code string and file name) |
-| `async`    | boolean | whether to asynchronously load the module (corresponding to `import()` call) |
 | `subPath`  | string  | the subpath of a module to load (e.g., `helpers` in `require('yargs/helpers')`) |
-| `globalThis` | object | the mocked globalThis  |
+| `globalThis` | object | the mocked globalThis for executing the initialization code in the loading process  |
 | `returnSourceFiles` | boolean | whether to return all included source files |
 
 
