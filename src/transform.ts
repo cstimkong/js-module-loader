@@ -3,9 +3,10 @@
  * Transform a ESM source file into CommonJS-style file for require calls
  */
 import babelParser, { parse, parseExpression } from '@babel/parser'
-import babelTraverse, { NodePath, Node } from '@babel/traverse';
+import babelTraverse, { Node } from '@babel/traverse';
 import babelTemplate from '@babel/template';
-import { objectPattern, 
+import {
+    objectPattern,
     arrayPattern,
     identifier,
     Statement,
@@ -15,8 +16,18 @@ import { objectPattern,
     blockStatement,
     expressionStatement,
     assignmentExpression,
-    memberExpression, 
-    exportDefaultSpecifier} from '@babel/types';
+    memberExpression,
+    exportDefaultSpecifier,
+    variableDeclaration,
+    variableDeclarator,
+    awaitExpression,
+    callExpression,
+    ObjectProperty,
+    objectExpression,
+    numericLiteral,
+    Identifier,
+    Expression
+} from '@babel/types';
 import babelGenerator from '@babel/generator'
 
 function getDestructuredVariables(node: Node): string[] {
@@ -49,9 +60,11 @@ function getDestructuredVariables(node: Node): string[] {
     return vars;
 }
 
-export default function transformESMSyntax(source: string) {
-    let ast = babelParser.parse(source, {sourceType: 'module'});
+export function transformESMForAsyncLoad(source: string) {
+    let ast = babelParser.parse(source, { sourceType: 'module' });
     let exportedMap: NodeJS.Dict<any> = {};
+    let importedModules: Set<string> = new Set();
+    let defaultExport = null;
 
     babelTraverse.default(ast, {
         Program: {
@@ -67,79 +80,167 @@ export default function transformESMSyntax(source: string) {
                 }
                 path.node.body = importStatements.concat(otherStatements);
             },
-            exit(path) {
-                path.node.body = [expressionStatement(functionExpression(null, 
-                    [
-                        identifier('__exports'),
-                        identifier('__import'),
-                        identifier('__importmeta')
-                    ],
-                    blockStatement(path.node.body, path.node.directives)
-                ))];
-                path.skip();
-
-            }
         },
         ExportNamedDeclaration: {
             enter(path) {
-                let declaration = path.get('declaration').node;
-                let specifiers = path.get('specifiers');
-                if (declaration !== undefined && declaration !== null && declaration.type === 'FunctionDeclaration') {
-
-                    path.replaceWith(declaration);
-                    path.insertAfter(expressionStatement(
-                        assignmentExpression('=',
-                            memberExpression(
-                                identifier('__exports'),
-                                identifier(declaration.id!.name),
-                            ),
-                            identifier(declaration.id!.name)
-                        )
-                    ));
-
-                    exportedMap[declaration.id!.name] = declaration.id!.name;
-                    path.skip();
+                if (path.node.source !== null && path.node.source !== undefined) {
+                    importedModules.add(path.node.source.value);
                 }
+                else {
+                    let declaration = path.get('declaration').node;
+                    let specifiers = path.get('specifiers');
+                    if (declaration !== undefined && declaration !== null && (declaration.type === 'FunctionDeclaration' || declaration.type === 'ClassDeclaration')) {
 
-                else if (declaration !== null && declaration !== undefined && declaration.type === 'VariableDeclaration') {
-                    let exportStatements: Statement[] = [];
-                    
-                    for (let p of declaration.declarations) {
-                        for (let exportedName of getDestructuredVariables(p.id)) {
-                            exportStatements.push(expressionStatement(
-                                assignmentExpression('=', 
-                                    memberExpression(identifier('__exports'), identifier(exportedName)),
-                                    identifier(exportedName)
-                                )
-                            ))
-                            exportedMap[exportedName] = exportedName;
-                        }
-                        
                         path.replaceWith(declaration);
-                        path.skip();
-                        path.insertAfter(exportStatements);
-                    }
-                }
 
-                else if (declaration === null && specifiers.length > 0) {
-                    for (let s of specifiers) {
-                        if (s.node.type === 'ExportSpecifier') {
-                            if (s.node.exported.type === 'Identifier') {
-                                exportedMap[s.node.exported.name] = s.node.local.name;
-                            } else {
-                                exportedMap[s.node.exported.value] = s.node.local.name;
+                        exportedMap[declaration.id!.name] = declaration.id!.name;
+                        path.skip();
+                    }
+
+                    else if (declaration !== null && declaration !== undefined && declaration.type === 'VariableDeclaration') {
+
+                        for (let p of declaration.declarations) {
+                            for (let exportedName of getDestructuredVariables(p.id)) {
+                                exportedMap[exportedName] = exportedName;
+                            }
+
+                            path.replaceWith(declaration);
+                            path.skip();
+                        }
+                    }
+
+                    else if (declaration === null && specifiers.length > 0) {
+                        for (let s of specifiers) {
+                            if (s.node.type === 'ExportSpecifier') {
+                                if (s.node.exported.type === 'Identifier') {
+                                    exportedMap[s.node.local.name] = s.node.exported.name;
+                                } else {
+                                    exportedMap[s.node.local.name] = s.node.exported.value;
+                                }
                             }
                         }
+                        path.remove();
                     }
                 }
             }
         },
         ImportDeclaration: {
-            exit(path) {
-                let template = babelTemplate.default('const %%structure%% = await __import(%%importname%%)');
+            enter(path) {
+                importedModules.add(path.node.source.value);
+            },
+        }
+    });
 
+    // Modify the AST
+    babelTraverse.default(ast, {
+        Program: {
+            exit(p) {
+                p.traverse({
+                    AssignmentExpression: {
+                        exit(path) {
+                            if (path.get('left').isIdentifier()) {
+                                let varName = (path.get('left').node as Identifier).name;
+
+                                if (path.scope.getBinding(varName) && path.scope.getBinding(varName) === p.scope.getBinding(varName) && exportedMap[varName]) {
+                                    path.replaceWith(assignmentExpression('=',
+                                        memberExpression(
+                                            memberExpression(identifier('__exports'), identifier('0'), true),
+                                            identifier(exportedMap[varName]),
+                                        ),
+                                        assignmentExpression(path.node.operator, identifier(varName), path.node.right)
+
+                                    ));
+                                    path.skip();
+                                }
+                            }
+                        }
+                    },
+                    VariableDeclaration: {
+                        exit(path) {
+                            let exportedVars: any[] = [];
+                            for (let declarator of path.node.declarations) {
+                                let vars = getDestructuredVariables(declarator.id);
+                                if (path.scope === p.scope) {
+                                    for (let v of vars) {
+                                        if (exportedMap[v]) {
+                                            exportedVars.push([v, exportedMap[v]]);
+                                        }
+                                    }
+                                }
+                            }
+                            let statements: Statement[] = [];
+                            for (let [localName, exportedName] of exportedVars) {
+                                statements.push(expressionStatement(
+                                    assignmentExpression('=',
+                                        memberExpression(
+                                            memberExpression(identifier('__exports'), identifier('0'), true),
+                                            stringLiteral(exportedName),
+                                            true
+                                        ),
+                                        identifier(localName)
+                                    )
+                                ))
+                            }
+                            path.insertAfter(statements);
+
+                        }
+                    }
+
+                })
+                let properties: ObjectProperty[] = [];
+
+                for (let m of importedModules) {
+                    properties.push(
+                        objectProperty(
+                            stringLiteral(m),
+                            awaitExpression(
+                                callExpression(identifier('__import'), [stringLiteral(m)])
+                            )
+                        )
+                    )
+                }
+                let importDecl: Statement = variableDeclaration('const',
+                    [
+                        variableDeclarator(identifier('__imports'), objectExpression(properties))
+                    ]
+                )
+                objectExpression(properties);
+                p.node.body = [expressionStatement(functionExpression(null,
+                    [
+                        identifier('__exports'),
+                        identifier('__import'),
+                        identifier('__importmeta')
+                    ],
+                    blockStatement(([importDecl] as Statement[]).concat(p.node.body), p.node.directives),
+                    false, true
+                ))];
+                p.skip();
+
+            }
+        },
+        ExportDefaultDeclaration: {
+
+            exit(path) {
+                path.replaceWith(
+                    expressionStatement(
+                        assignmentExpression('=',
+                            memberExpression(
+                                identifier('__exports'),
+                                identifier('1'),
+                                true
+                            ),
+                            path.node.declaration as Expression
+                        )
+                    )
+                );
+                path.skip();
+            }
+        },
+        ImportDeclaration: {
+            exit(path) {
                 let importMap: { [key: string]: string } = {};
                 let defaultImportName: string | null = null;
+                let namespace: string | null = null;
                 for (let spec of path.node.specifiers) {
                     if (spec.type === 'ImportSpecifier' && spec.imported.type === 'Identifier') {
                         importMap[spec.imported.name] = spec.local.name;
@@ -150,38 +251,40 @@ export default function transformESMSyntax(source: string) {
                     else if (spec.type === 'ImportDefaultSpecifier') {
                         defaultImportName = spec.local.name;
                     }
-                }
-                
-                let elements = [];
-                if (Object.keys(importMap).length > 0) {
-                    let properties: any[] = [];
-                    for (let [k, v] of Object.entries(importMap)) {
-                        properties.push(objectProperty(
-                            stringLiteral(k),
-                            identifier(v),
-                            false,
-                        ));
+                    else if (spec.type === 'ImportNamespaceSpecifier') {
+                        namespace = spec.local.name;
                     }
+                }
 
-                    elements.push(objectPattern(properties));
+                let statements: Statement[] = [];
+
+                for (let [k, v] of Object.entries(importMap)) {
+                    statements.push(variableDeclaration('const', [
+                        variableDeclarator(identifier(v), memberExpression(
+                            memberExpression(
+                                memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true),
+                                identifier("0"), true
+                            ), stringLiteral(k), true
+                        ))
+                    ]))
                 }
-                else {
-                    elements.push(null);
-                }
+
                 if (defaultImportName) {
-                    elements.push(identifier(defaultImportName));
+                    statements.push(variableDeclaration('const', [
+                        variableDeclarator(identifier(defaultImportName), memberExpression(memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true), identifier("1"), true))
+                    ]))
                 }
-                let objPattern = arrayPattern(elements);
-                let transformed = template({
-                    importname: path.get('source').node,
-                    structure: objPattern
-                });
-                path.replaceWith(transformed as Statement);
-                path.skip();
-                
+
+                if (namespace) {
+                    statements.push(variableDeclaration('const', [
+                        variableDeclarator(identifier(namespace), memberExpression(memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true), identifier("0"), true))
+                    ]))
+                }
+
+                path.insertAfter(statements);
+                path.remove();
             }
         }
     })
-    console.log(exportedMap);
     return babelGenerator.default(ast).code;
 }
