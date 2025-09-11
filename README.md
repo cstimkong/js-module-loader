@@ -1,6 +1,6 @@
 # JavaScript Module Loader
 
-The project provide another runtime module loader isolated from the default module loaders (global `require`, `import()` mechanism), easy for instrumenting the code. It is suitable for testing the JavaScript modules in an isolated environment.
+The project provide another runtime module loader isolated from the default module loaders (global `require`, `import()` mechanism), and is easy for instrumenting the code. It is suitable for testing multiple JavaScript modules in an isolated environment.
 
 ## How to Use
 
@@ -35,7 +35,7 @@ Suppose that `yargs` module is installed at `/home/test/yargs`. Now you want to 
 
 ```javascript
 const loadNodeJSModule = require('js-module-loader');
-let mod = loadNodeJSModule('/home/test/yargs', {subPath: 'helpers'});
+let mod = loadNodeJSModule('/home/test/yargs', true, {subPath: 'helpers'});
 let hideBin = mod.hideBin;
 ```
 
