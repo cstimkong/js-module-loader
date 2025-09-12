@@ -17,7 +17,6 @@ import {
     expressionStatement,
     assignmentExpression,
     memberExpression,
-    exportDefaultSpecifier,
     variableDeclaration,
     variableDeclarator,
     awaitExpression,
@@ -64,7 +63,6 @@ export function transformESMForAsyncLoad(source: string) {
     let ast = babelParser.parse(source, { sourceType: 'module' });
     let exportedMap: NodeJS.Dict<any> = {};
     let importedModules: Set<string> = new Set();
-    let defaultExport = null;
 
     babelTraverse.default(ast, {
         Program: {
@@ -168,6 +166,9 @@ export function transformESMForAsyncLoad(source: string) {
                                     }
                                 }
                             }
+                            if (exportedVars.length === 0) {
+                                return;
+                            }
                             let statements: Statement[] = [];
                             for (let [localName, exportedName] of exportedVars) {
                                 statements.push(expressionStatement(
@@ -219,7 +220,6 @@ export function transformESMForAsyncLoad(source: string) {
             }
         },
         ExportDefaultDeclaration: {
-
             exit(path) {
                 path.replaceWith(
                     expressionStatement(
@@ -233,6 +233,60 @@ export function transformESMForAsyncLoad(source: string) {
                         )
                     )
                 );
+                path.skip();
+            }
+        },
+        ExportNamedDeclaration: {
+            exit(path) { // the declaration will only be `export {...} from "..."`
+                if (path.node.source !== null && path.node.source !== undefined) {
+                    let statements: Statement[] = [];
+                    for (let spec of path.node.specifiers) {
+                        if (spec.type === 'ExportSpecifier') {
+                            statements.push(expressionStatement(
+                                assignmentExpression('=',
+                                    memberExpression(
+                                        memberExpression(identifier('__exports'), identifier('0'), true),
+                                        stringLiteral(spec.exported.type === 'Identifier' ? spec.exported.name : spec.exported.value),
+                                        true
+                                    ),
+                                    memberExpression(
+                                        memberExpression(
+                                            memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true),
+                                            identifier('0'), true
+                                        ), stringLiteral(spec.local.name), true
+                                    )
+                                )
+                            ))
+                        }
+                        else if (spec.type === 'ExportNamespaceSpecifier') {
+                            statements.push(expressionStatement(
+                                assignmentExpression('=',
+                                    memberExpression(
+                                        memberExpression(identifier('__exports'), identifier('0'), true),
+                                        stringLiteral(spec.exported.name),
+                                        true
+                                    ),
+                                    memberExpression(
+                                        memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true),
+                                        identifier('0'), true
+                                    )
+                                )
+                            ))
+                        }
+                    }
+                    path.insertAfter(statements);
+                    path.remove();
+                }
+            }
+        },
+        ExportAllDeclaration: {
+            exit(path) {
+                let n = babelTemplate.default('for (let _m of Object.getOwnPropertyNames(__imports[%%source%%][0])) { __exports[0][_m] = __imports[%%source%%][0][_m]}')(
+                    {
+                        source: stringLiteral(path.node.source.value)
+                    }
+                ) as Statement;
+                path.replaceWith(n);
                 path.skip();
             }
         },
