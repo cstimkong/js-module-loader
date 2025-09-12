@@ -55,7 +55,7 @@ function getDestructuredVariables(node: Node): string[] {
             vars = vars.concat(getDestructuredVariables(p));
         }
     }
-
+    // TODO: Support spread elements
     return vars;
 }
 
@@ -185,6 +185,22 @@ export function transformESMForAsyncLoad(source: string) {
                             }
                             path.insertAfter(statements);
 
+                        }
+                    },
+                    FunctionDeclaration: {
+                        exit(path) {
+                            if (path.scope.parent === p.scope && path.node.id && exportedMap[path.node.id.name]) {
+                                path.insertAfter(expressionStatement(
+                                    assignmentExpression('=',
+                                        memberExpression(
+                                            memberExpression(identifier('__exports'), identifier('0'), true),
+                                            stringLiteral(exportedMap[path.node.id.name]),
+                                            true
+                                        ),
+                                        identifier(path.node.id.name)
+                                    )
+                                ));
+                            }
                         }
                     }
 
