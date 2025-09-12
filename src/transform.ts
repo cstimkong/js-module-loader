@@ -64,6 +64,7 @@ export function transformESMForAsyncLoad(source: string) {
     let exportedMap: NodeJS.Dict<any> = {};
     let importedModules: Set<string> = new Set();
 
+    // Collect export and import items
     babelTraverse.default(ast, {
         Program: {
             enter(path) {
@@ -129,7 +130,7 @@ export function transformESMForAsyncLoad(source: string) {
         }
     });
 
-    // Modify the AST
+    // Modify the AST: import statements and exported identifiers in program
     babelTraverse.default(ast, {
         Program: {
             exit(p) {
@@ -219,6 +220,59 @@ export function transformESMForAsyncLoad(source: string) {
 
             }
         },
+        ImportDeclaration: {
+            exit(path) {
+                let importMap: { [key: string]: string } = {};
+                let defaultImportName: string | null = null;
+                let namespace: string | null = null;
+                for (let spec of path.node.specifiers) {
+                    if (spec.type === 'ImportSpecifier' && spec.imported.type === 'Identifier') {
+                        importMap[spec.imported.name] = spec.local.name;
+                    }
+                    else if (spec.type === 'ImportSpecifier' && spec.imported.type === 'StringLiteral') {
+                        importMap[spec.imported.value] = spec.local.name;
+                    }
+                    else if (spec.type === 'ImportDefaultSpecifier') {
+                        defaultImportName = spec.local.name;
+                    }
+                    else if (spec.type === 'ImportNamespaceSpecifier') {
+                        namespace = spec.local.name;
+                    }
+                }
+
+                let statements: Statement[] = [];
+
+                for (let [k, v] of Object.entries(importMap)) {
+                    statements.push(variableDeclaration('const', [
+                        variableDeclarator(identifier(v), memberExpression(
+                            memberExpression(
+                                memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true),
+                                identifier("0"), true
+                            ), stringLiteral(k), true
+                        ))
+                    ]))
+                }
+
+                if (defaultImportName) {
+                    statements.push(variableDeclaration('const', [
+                        variableDeclarator(identifier(defaultImportName), memberExpression(memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true), identifier("1"), true))
+                    ]))
+                }
+
+                if (namespace) {
+                    statements.push(variableDeclaration('const', [
+                        variableDeclarator(identifier(namespace), memberExpression(memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true), identifier("0"), true))
+                    ]))
+                }
+
+                path.insertAfter(statements);
+                path.remove();
+            }
+        },
+    });
+
+    // Modify the AST: special export statements, 
+    babelTraverse.default(ast, {
         ExportDefaultDeclaration: {
             exit(path) {
                 path.replaceWith(
@@ -288,55 +342,6 @@ export function transformESMForAsyncLoad(source: string) {
                 ) as Statement;
                 path.replaceWith(n);
                 path.skip();
-            }
-        },
-        ImportDeclaration: {
-            exit(path) {
-                let importMap: { [key: string]: string } = {};
-                let defaultImportName: string | null = null;
-                let namespace: string | null = null;
-                for (let spec of path.node.specifiers) {
-                    if (spec.type === 'ImportSpecifier' && spec.imported.type === 'Identifier') {
-                        importMap[spec.imported.name] = spec.local.name;
-                    }
-                    else if (spec.type === 'ImportSpecifier' && spec.imported.type === 'StringLiteral') {
-                        importMap[spec.imported.value] = spec.local.name;
-                    }
-                    else if (spec.type === 'ImportDefaultSpecifier') {
-                        defaultImportName = spec.local.name;
-                    }
-                    else if (spec.type === 'ImportNamespaceSpecifier') {
-                        namespace = spec.local.name;
-                    }
-                }
-
-                let statements: Statement[] = [];
-
-                for (let [k, v] of Object.entries(importMap)) {
-                    statements.push(variableDeclaration('const', [
-                        variableDeclarator(identifier(v), memberExpression(
-                            memberExpression(
-                                memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true),
-                                identifier("0"), true
-                            ), stringLiteral(k), true
-                        ))
-                    ]))
-                }
-
-                if (defaultImportName) {
-                    statements.push(variableDeclaration('const', [
-                        variableDeclarator(identifier(defaultImportName), memberExpression(memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true), identifier("1"), true))
-                    ]))
-                }
-
-                if (namespace) {
-                    statements.push(variableDeclaration('const', [
-                        variableDeclarator(identifier(namespace), memberExpression(memberExpression(identifier('__imports'), stringLiteral(path.node.source.value), true), identifier("0"), true))
-                    ]))
-                }
-
-                path.insertAfter(statements);
-                path.remove();
             }
         }
     })
