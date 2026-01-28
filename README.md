@@ -47,4 +47,4 @@ This is equivalent to the code  `const { hideBin } = require('yargs/helpers')` (
 
 ## Contact
 
-For any questions and suggestions, please contact me via *mail AT dezhen DOT io*.
+For any questions and suggestions, please contact me via *mail AT dezhen DOT org*.
