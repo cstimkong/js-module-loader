@@ -7,16 +7,17 @@ The project provide another runtime module loader isolated from the default modu
 ### General Usage Patterns
 
 ```javascript
-function loadNodeJSModule(modulePath: string, async: false, options?: LoadOptions): any;
-function loadNodeJSModule(modulePath: string, async: true, options?: LoadOptions): Promise<any>;
+function loadModule(modulePath: string, options?: LoadOptions): any;
+function loadModuleAsync(modulePath: string, options?: LoadOptions): Promise<any>;
 ```
+
+The second format is to load the module asynchronously (corresponding to [import()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import)).
 
 Parameters are explained as follows:
 
 | Parameter | Explanation |
 | --------- | ----------- |
 | `modulePath` | Absolute (or relative path to the working directory) to a Node.js module | 
-| `async` | Load the module asynchronously (corresponding to [import()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import)) or synchronously (corresponding to `require` calls). |
 | `options` | Additional options (detailed below) |
 
 Supported options:
@@ -24,9 +25,11 @@ Supported options:
 | Option name | Type  | Description |
 | ----------- | ----- | ----------- |
 | `instrumentFunc` | `Function` or `null` | function for instrumentation, accepting 2 arguments (code string and file name) |
-| `subPath`  | string  | the subpath of a module to load (e.g., `helpers` in `require('yargs/helpers')`) |
+| `subpath`  | string  | the subpath of a module to load (e.g., `helpers` in `require('yargs/helpers')`) |
 | `globalThis` | object | the mocked globalThis for executing the initialization code in the loading process  |
 | `returnSourceFiles` | boolean | whether to return all included source files |
+| `cache` | object | the cache object in loading the module |
+| `patchExportDefault` | object | whether to return the default export separately |
 
 
 ### Example
@@ -44,4 +47,4 @@ This is equivalent to the code  `const { hideBin } = require('yargs/helpers')` (
 
 ## Contact
 
-For any questions and suggestions, please contact me via [tim.kong@libc.io](mailto:tim.kong@libc.io).
+For any questions and suggestions, please contact me via *mail AT dezhen DOT io*.
