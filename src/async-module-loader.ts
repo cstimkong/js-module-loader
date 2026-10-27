@@ -92,7 +92,7 @@ function resolveSubpath(subpath: string | undefined, packagePath: string) {
             throw new Error('Invalid package type in package.json.');
         }
         if (subpath === undefined) {
-            if (packageJson.main !== null && packageJson.main !== undefined) {
+            if (!packageJson.exports && packageJson.main !== null && packageJson.main !== undefined) {
                 return resolveMainExport(packageJson.main, packagePath);
             } else {
                 if (typeof packageJson.exports === 'string') {
@@ -178,29 +178,41 @@ function resolveModulePath(moduleSpecifier: string, filePath: string): string {
 
 }
 
-function resolveImports(ast: ParseResult, filePath: string) {
-    let result: NodeJS.Dict<{ source: string, type: 'default' | 'namespace' | 'named', imported?: string }> = {};
-
-    babelTraverse.default(ast, {
-        exit(path) {
-            if (path.isImportDeclaration()) {
-                let source = path.node.source.value;
-                let sourcePath = resolveModulePath(source, filePath);
-                for (let x of path.node.specifiers) {
-                    if (x.type === 'ImportDefaultSpecifier') {
-                        result[x.local.name] = { source: sourcePath, type: 'default' };
+function resolveImports(filePath: string) {
+    let result: {[f: string]: {[v: string]: { source: string, type: 'default' | 'namespace' | 'named', imported?: string }}} = {};
+    let visitedSourceFileSet = new Set();
+    let sourceFileList = [resolve(filePath)];
+    while (sourceFileList.length > 0) {
+        let f = sourceFileList.shift();
+        visitedSourceFileSet.add(f);
+        if (!result[f!]) {
+            result[f!] = {};
+        }
+        let ast = parseSourceFile(readFileSync(f!, { encoding: 'utf-8' }), { filename: f! });
+        babelTraverse.default(ast.ast, {
+            exit(path) {
+                if (path.isImportDeclaration()) {
+                    let source = path.node.source.value;
+                    let sourcePath = resolveModulePath(source, filePath);
+                    for (let x of path.node.specifiers) {
+                        if (x.type === 'ImportDefaultSpecifier') {
+                            result[f!]![x.local.name] = { source: sourcePath, type: 'default' };
+                        }
+                        else if (x.type === 'ImportNamespaceSpecifier') {
+                            result[f!]![x.local.name] = { source: sourcePath, type: 'namespace' };
+                        }
+                        else {
+                            result[f!]![x.local.name] = { source: sourcePath, type: 'named', imported: x.imported.type === 'Identifier' ? x.imported.name : x.imported.value };
+                        }
                     }
-                    else if (x.type === 'ImportNamespaceSpecifier') {
-                        result[x.local.name] = { source: sourcePath, type: 'namespace' };
-                    }
-                    else {
-                        result[x.local.name] = { source: sourcePath, type: 'named', imported: x.imported.type === 'Identifier' ? x.imported.name : x.imported.value };
-                    }
+                    if (!sourcePath.startsWith('node:') && !visitedSourceFileSet.has(sourcePath))
+                        sourceFileList.push(sourcePath);
                 }
             }
-        }
 
-    });
+        });
+    }
+
     return result;
 }
 
@@ -225,6 +237,5 @@ export function parseSourceFile(source: string, options: { filename: string }): 
 }
 
 let filename = './temp/mod1.js';
-let content = readFileSync(filename, { encoding: 'utf-8' });
-let { ast } = parseSourceFile(content, { filename: filename });
-console.log(resolveImports(ast, filename));
+
+console.log(resolveImports(filename));
